@@ -8,8 +8,8 @@ let rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 const SPEAK_THRESHOLD = 0.03; // RMS (0..1) coi là đang nói
 const SPEAK_HOLD_MS = 300;
 
-// sendSignal(toId, data); onSpeaking(id, isSpeaking)
-export function createVoice({ sendSignal, onSpeaking }) {
+// sendSignal(toId, data); onSpeaking(id, isSpeaking); getVolume(id) -> 0..1: âm lượng nghe người đó (gần/xa, hát...)
+export function createVoice({ sendSignal, onSpeaking, getVolume }) {
   let selfId = null;
   let started = false;
   let starting = null;
@@ -34,7 +34,7 @@ export function createVoice({ sendSignal, onSpeaking }) {
 
   function createPeer(id, initiator) {
     const pc = new RTCPeerConnection(rtcConfig);
-    const peer = { pc, audio: null, analyser: null, speaking: false, lastLoud: 0 };
+    const peer = { pc, audio: null, gain: null, volume: null, analyser: null, speaking: false, lastLoud: 0 };
     peers.set(id, peer);
 
     if (localStream) localStream.getTracks().forEach((t) => pc.addTrack(t, localStream));
@@ -62,11 +62,32 @@ export function createVoice({ sendSignal, onSpeaking }) {
     audio.srcObject = stream;
     document.body.appendChild(audio);
     peer.audio = audio;
+
+    // Chỉnh âm lượng bằng audio.volume. iPhone/iPad không cho đổi volume (luôn là 1), nên ở đó
+    // dùng Web Audio: tắt tiếng phần tử <audio> (vẫn để nó chạy cho luồng không bị ngắt) rồi phát qua GainNode.
+    audio.volume = 0.5;
+    if (audio.volume !== 0.5 && audioCtx) {
+      audio.muted = true;
+      peer.gain = audioCtx.createGain();
+      audioCtx.createMediaStreamSource(stream).connect(peer.gain);
+      peer.gain.connect(audioCtx.destination);
+    }
+    applyVolume(peer, getVolume ? getVolume(id) : 1);
+
     if (audioCtx) {
       peer.analyser = audioCtx.createAnalyser();
       peer.analyser.fftSize = 256;
-      audioCtx.createMediaStreamSource(stream).connect(peer.analyser);
+      audioCtx.createMediaStreamSource(stream).connect(peer.analyser); // đo trước khi chỉnh âm lượng, nên đèn "đang nói" không phụ thuộc khoảng cách
     }
+  }
+
+  function applyVolume(peer, volume) {
+    if (!peer.audio) return;
+    const v = Math.min(1, Math.max(0, volume));
+    if (peer.volume !== null && Math.abs(peer.volume - v) < 0.01) return; // chưa đổi đáng kể thì thôi
+    peer.volume = v;
+    if (peer.gain) peer.gain.gain.value = v;
+    else peer.audio.volume = v;
   }
 
   function closePeer(id) {
@@ -91,6 +112,7 @@ export function createVoice({ sendSignal, onSpeaking }) {
   setInterval(() => {
     const now = performance.now();
     for (const [id, peer] of peers) {
+      if (getVolume) applyVolume(peer, getVolume(id)); // theo khoảng cách hiện tại (người đi lại)
       if (!peer.analyser) continue;
       peer.analyser.getByteTimeDomainData(buf);
       let sum = 0;

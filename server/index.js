@@ -8,6 +8,7 @@ import { Server } from 'socket.io';
 const PORT = process.env.PORT || 3000;
 const MAX_PLAYERS = 10;
 const SEAT_COUNT = 18; // phải khớp SEATS.length ở client/src/scene/cinema.js
+const STAGE_COUNT = 2; // phải khớp STAGES.length ở client/src/scene/cinema.js; mỗi sân khấu một mic, một người hát
 
 // Đánh nhau: server kiểm tra tầm đánh, hướng nhìn và thời gian chờ để không ai gian lận hay spam
 const PUNCH_RANGE = 1.8; // m
@@ -93,6 +94,7 @@ io.on('connection', (socket) => {
       z: -4,
       ry: 0,
       seat: null, // chỉ số ghế đang ngồi, hoặc null
+      stage: null, // chỉ số sân khấu đang hát, hoặc null
       lastPunchAt: 0,
       stunnedUntil: 0,
       immuneUntil: 0,
@@ -124,12 +126,34 @@ io.on('connection', (socket) => {
     const seat = data.seat;
     const valid = Number.isInteger(seat) && seat >= 0 && seat < SEAT_COUNT;
     const taken = valid && [...players.values()].some((o) => o.id !== p.id && o.seat === seat);
-    if (!valid || taken) {
+    if (!valid || taken || p.stage !== null) {
       socket.emit('seat-denied');
       return;
     }
     p.seat = seat;
     io.emit('seat-update', { id: p.id, seat });
+  });
+
+  // Hát trên sân khấu: mỗi sân khấu một mic, một người hát. Người đang hát được nghe cả phòng (xử lý ở client).
+  socket.on('sing', (data = {}) => {
+    const p = players.get(socket.id);
+    if (!p) return;
+    const stage = data.stage;
+    const valid = Number.isInteger(stage) && stage >= 0 && stage < STAGE_COUNT;
+    const taken = valid && [...players.values()].some((o) => o.id !== p.id && o.stage === stage);
+    if (!valid || taken || p.seat !== null) {
+      socket.emit('stage-denied');
+      return;
+    }
+    p.stage = stage;
+    io.emit('stage-update', { id: p.id, stage });
+  });
+
+  socket.on('stop-sing', () => {
+    const p = players.get(socket.id);
+    if (!p || p.stage === null) return;
+    p.stage = null;
+    io.emit('stage-update', { id: p.id, stage: null });
   });
 
   socket.on('stand', () => {
@@ -167,6 +191,10 @@ io.on('connection', (socket) => {
     if (target.seat !== null) {
       target.seat = null;
       io.emit('seat-update', { id: target.id, seat: null });
+    }
+    if (target.stage !== null) {
+      target.stage = null; // đang hát mà bị đánh thì bị đẩy khỏi sân khấu
+      io.emit('stage-update', { id: target.id, stage: null });
     }
     io.emit('stun', { id: target.id, by: p.id, duration: STUN_MS });
   });

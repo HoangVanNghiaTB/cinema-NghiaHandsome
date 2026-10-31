@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls.js';
 import { CSS3DRenderer, CSS3DObject } from 'three/examples/jsm/renderers/CSS3DRenderer.js';
-import { buildCinema, floorHeight, ROOM, SCREEN, SEATS } from './scene/cinema.js';
+import { buildCinema, floorHeight, ROOM, SCREEN, SEATS, STAGES } from './scene/cinema.js';
 import { createTouchControls } from './ui/touch.js';
 import { StunRing } from './scene/stunRing.js';
 import { createSounds, STEP_LENGTH } from './audio/sounds.js';
@@ -208,6 +208,7 @@ function updateHud() {
 const voice = createVoice({
   sendSignal: (to, data) => room.sendSignal(to, data),
   onSpeaking: (id, speaking) => avatars.setSpeaking(id, speaking),
+  getVolume: (id) => voiceVolume(id), // gần/xa; người đang hát thì nghe cả phòng
 });
 function toggleMic() {
   if (voiceMode !== 'mic') return;
@@ -280,11 +281,14 @@ function joinRoom(profile) {
       myId = id;
       names.clear();
       seatOwners.clear();
+      stageOwners.clear();
       mySeat = null;
+      myStage = null;
       others.forEach((p) => {
         avatars.add(p);
         names.set(p.id, p.name);
         if (p.seat !== null) seatOwners.set(p.seat, p.id);
+        if (p.stage !== null) stageOwners.set(p.stage, p.id);
       });
       voice.setRoster(id, others.map((p) => p.id), iceServers);
       loadedVideoId = null; // kết nối lại: nạp lại từ đầu theo trạng thái server
@@ -316,11 +320,30 @@ function joinRoom(profile) {
       }
     },
     onSeatDenied: () => addChatLine('Ghế này đã có người ngồi.', { system: true }),
+    onStage: ({ id, stage }) => {
+      for (const [index, owner] of stageOwners) if (owner === id) stageOwners.delete(index);
+      if (stage !== null) stageOwners.set(stage, id);
+      if (id !== myId) return;
+      const previous = myStage;
+      myStage = stage;
+      if (stage !== null) {
+        micBeforeSing = micOn;
+        setMic(true); // hát thì bật mic
+        lookToward(STAGES[stage].ry); // quay mặt về phía khán giả
+      } else if (previous !== null) {
+        // hát xong (hoặc bị đẩy khỏi sân khấu): bước xuống phía trước sân khấu, trả mic về như cũ
+        camera.position.x = STAGES[previous].spotX;
+        camera.position.z = STAGES[previous].spotZ + 1.8;
+        setMic(micBeforeSing);
+      }
+    },
+    onStageDenied: () => addChatLine('Sân khấu này đã có người hát.', { system: true }),
     onStun: ({ id, duration }) => startStun(id, duration),
     onLeave: (id) => {
       clearTimeout(stunTimers.get(id));
       stunTimers.delete(id);
       for (const [index, owner] of seatOwners) if (owner === id) seatOwners.delete(index);
+      for (const [index, owner] of stageOwners) if (owner === id) stageOwners.delete(index);
       avatars.remove(id);
       voice.peerLeft(id);
       if (names.has(id)) addChatLine(`${names.get(id)} rời rạp`, { system: true });
@@ -340,7 +363,9 @@ function joinRoom(profile) {
         myId = null;
         names.clear();
         seatOwners.clear();
+        stageOwners.clear();
         mySeat = null;
+        myStage = null;
         stunUntil = 0;
         stunRing.hide();
         controls.pointerSpeed = 1;
@@ -417,10 +442,66 @@ function nearestFreeSeat() {
   return best;
 }
 
-function toggleSit() {
+// Hát trên sân khấu: đứng gần sân khấu còn trống thì hát được (cũng bằng phím E / nút trên điện thoại).
+// Hát thì đứng im sau mic như ngồi ghế; tiếng của người hát vang toàn phòng, không theo luật gần xa.
+const STAGE_REACH = 3; // m: cách chỗ đứng hát trong khoảng này mới thấy nút "Hát"
+const stageOwners = new Map(); // chỉ số sân khấu -> id người đang hát
+let myStage = null; // sân khấu mình đang hát (đã được server xác nhận)
+let micBeforeSing = false; // trước khi hát mic đang bật hay tắt, để trả lại khi hát xong
+
+function nearestFreeStage() {
+  const p = camera.position;
+  let best = -1;
+  let bestDist = STAGE_REACH;
+  STAGES.forEach((s, i) => {
+    if (stageOwners.has(i)) return;
+    const d = Math.hypot(s.spotX - p.x, s.spotZ - p.z);
+    if (d < bestDist) {
+      best = i;
+      bestDist = d;
+    }
+  });
+  return best;
+}
+
+// Âm lượng nghe người khác nói (0..1). Luật gần xa cho phòng nhỏ (20 x 18 m): trong 2 m nghe rõ nhất,
+// giảm dần theo khoảng cách, tới 20 m vẫn còn lờ mờ (15%) để đứng xa vẫn nhận ra có người nói.
+const VOICE_MAX = 0.6; // 3/5 âm lượng ban đầu
+const VOICE_NEAR = 2;
+const VOICE_FAR = 20;
+const VOICE_MIN = 0.15; // phần còn lại ở xa nhất
+const STAGE_MIC_VOLUME = 0.75; // mic sân khấu: 3/4 mức tối đa, nghe đều cả phòng
+function voiceVolume(id) {
+  for (const owner of stageOwners.values()) if (owner === id) return STAGE_MIC_VOLUME;
+  const avatar = avatars.items.get(id);
+  if (!avatar) return 0;
+  const d = Math.hypot(avatar.group.position.x - camera.position.x, avatar.group.position.z - camera.position.z);
+  const t = THREE.MathUtils.clamp((d - VOICE_NEAR) / (VOICE_FAR - VOICE_NEAR), 0, 1);
+  return VOICE_MAX * (VOICE_MIN + (1 - VOICE_MIN) * (1 - t) ** 1.5);
+}
+
+// Bật/tắt mic theo ý muốn (không đảo ngược)
+function setMic(on) {
+  if (voiceMode === 'mic' && micOn !== on) toggleMic();
+}
+
+// Phím E / nút trên điện thoại: đứng dậy, dừng hát, hoặc ngồi/hát nếu đang đứng gần chỗ trống
+function interact() {
   if (!room || !myId || isStunned()) return;
   if (mySeat !== null) {
     room.stand();
+    return;
+  }
+  if (myStage !== null) {
+    room.stopSing();
+    return;
+  }
+  if (nearestFreeStage() >= 0) {
+    if (voiceMode !== 'mic') {
+      addChatLine('Cần cho phép dùng micro để hát.', { system: true });
+      return;
+    }
+    room.sing(nearestFreeStage());
     return;
   }
   const seat = nearestFreeSeat();
@@ -429,8 +510,8 @@ function toggleSit() {
 
 const sitPrompt = $('sit-prompt');
 function updateSitPrompt() {
-  // Điện thoại: ngồi thì ẩn cần gạt đi (không đi được), đứng dậy thì hiện lại
-  const joyVisible = mySeat === null;
+  // Điện thoại: ngồi/hát thì ẩn cần gạt đi (không đi được), đứng dậy thì hiện lại
+  const joyVisible = mySeat === null && myStage === null;
   if (touch && joyVisible !== lastJoyVisible) {
     lastJoyVisible = joyVisible;
     touch.setJoyVisible(joyVisible);
@@ -439,6 +520,8 @@ function updateSitPrompt() {
   let text = '';
   if (isActive()) {
     if (mySeat !== null) text = isTouch ? 'Đứng' : 'Nhấn E để đứng dậy';
+    else if (myStage !== null) text = isTouch ? 'Dừng hát' : 'Nhấn E để dừng hát';
+    else if (nearestFreeStage() >= 0) text = isTouch ? 'Hát' : 'Nhấn E để hát';
     else if (nearestFreeSeat() >= 0) text = isTouch ? 'Ngồi' : 'Nhấn E để ngồi';
   }
   if (text === lastSitText) return;
@@ -517,11 +600,13 @@ const isActive = () => (isTouch ? touchActive : controls.isLocked);
 
 let yaw = 0;
 let pitch = 0;
-function lookForward() {
-  yaw = 0;
+// Quay về một hướng ngang (ry = 0: nhìn về phía màn hình; ry = π: nhìn về phía khán giả) và nhìn thẳng
+function lookToward(ry) {
+  yaw = ry;
   pitch = 0;
-  camera.rotation.set(0, 0, 0);
+  camera.rotation.set(0, ry, 0);
 }
+const lookForward = () => lookToward(0);
 
 const LOOK_SENSITIVITY = 0.005; // rad mỗi px khi kéo ngón tay
 const touch = isTouch
@@ -535,7 +620,7 @@ const touch = isTouch
       onMenu: () => setActive(false),
       onMic: () => (voiceMode === null ? startVoice() : toggleMic()),
       onChat: () => startChat(),
-      onSit: toggleSit,
+      onSit: interact,
       onPunch: punch,
     })
   : null;
@@ -582,7 +667,7 @@ controls.addEventListener('unlock', () => setActive(false));
 addEventListener('keydown', (e) => {
   if (!controls.isLocked) return;
   if (e.code === 'KeyM' && !e.repeat) toggleMic();
-  else if (e.code === 'KeyE' && !e.repeat) toggleSit();
+  else if (e.code === 'KeyE' && !e.repeat) interact();
   else if (e.code === 'KeyF' && !e.repeat) punch();
   else if (e.code === 'Enter' && !e.repeat) startChat();
   else keys.add(e.code);
@@ -621,6 +706,8 @@ function animate() {
 
   const p = camera.position;
   const seat = mySeat !== null ? SEATS[mySeat] : null;
+  const stage = myStage !== null ? STAGES[myStage] : null;
+  const locked = seat || stage; // ngồi hoặc đang hát thì đứng im tại chỗ
   const stepFromX = p.x;
   const stepFromZ = p.z;
 
@@ -629,8 +716,8 @@ function animate() {
       (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0) + (touch ? touch.move.y : 0), -1, 1);
     const right = THREE.MathUtils.clamp(
       (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0) + (touch ? touch.move.x : 0), -1, 1);
-    // đang ngồi thì không đi được, phải đứng dậy trước (phím E / nút Đứng)
-    if (!seat && (Math.abs(forward) > 0.1 || Math.abs(right) > 0.1)) {
+    // đang ngồi/hát thì không đi được, phải đứng dậy hoặc dừng hát trước (phím E / nút trên điện thoại)
+    if (!locked && (Math.abs(forward) > 0.1 || Math.abs(right) > 0.1)) {
       controls.moveForward(forward * SPEED * dt);
       controls.moveRight(right * SPEED * dt);
     }
@@ -643,17 +730,23 @@ function animate() {
     p.x += (seat.x - p.x) * k;
     p.z += (seat.z - p.z) * k;
     targetY = seat.y + SEATED_EYE_HEIGHT;
+  } else if (stage) {
+    // hát: đứng đúng chỗ sau mic trên sân khấu
+    const k = Math.min(1, dt * 10);
+    p.x += (stage.spotX - p.x) * k;
+    p.z += (stage.spotZ - p.z) * k;
+    targetY = stage.height + EYE_HEIGHT;
   } else {
-    // giữ trong phòng và bước theo độ cao bậc thang
+    // giữ trong phòng và bước theo độ cao bậc thang / sân khấu
     p.x = THREE.MathUtils.clamp(p.x, ROOM.minX + 0.5, ROOM.maxX - 0.5);
     p.z = THREE.MathUtils.clamp(p.z, ROOM.minZ + 0.5, ROOM.maxZ - 0.5);
-    targetY = floorHeight(p.z) + EYE_HEIGHT;
+    targetY = floorHeight(p.x, p.z) + EYE_HEIGHT;
   }
   p.y += (targetY - p.y) * Math.min(1, dt * 12);
 
   // Tiếng bước chân của chính mình: đi đủ một bước thì phát (ngồi/choáng thì không có)
   const walked = Math.hypot(p.x - stepFromX, p.z - stepFromZ);
-  if (seat || isStunned() || walked > 1.5) {
+  if (locked || isStunned() || walked > 1.5) {
     ownStepDist = 0;
   } else {
     ownStepDist += walked;

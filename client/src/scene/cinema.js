@@ -25,8 +25,28 @@ const ROW_DEPTH = 2;
 const ROW_RISE = 0.4;
 const ROWS_START_Z = -1; // hàng đầu bắt đầu từ đây
 
-// Độ cao sàn tại vị trí (x, z) — dùng để camera/avatar bước lên bậc
-export function floorHeight(z) {
+// Hai sân khấu nhỏ ở hai góc phòng, hai bên màn hình (x âm = bên trái, x dương = bên phải).
+// Mỗi sân khấu có 1 mic đứng; người hát đứng sau mic, quay mặt về phía khán giả (ry = π: nhìn về +z).
+// Server cũng dùng số lượng này (STAGE_COUNT trong server/index.js).
+const STAGE_WIDTH = 3.3;
+const STAGE_DEPTH = 3;
+const STAGE_HEIGHT = 0.5;
+export const STAGES = [-1, 1].map((side) => {
+  const x = side * 8.25; // nằm ngoài mép màn hình (màn hình rộng ±6.4)
+  const z = ROOM.minZ + 0.1 + STAGE_DEPTH / 2; // sát tường trước
+  return {
+    x, z, w: STAGE_WIDTH, d: STAGE_DEPTH, height: STAGE_HEIGHT,
+    micX: x, micZ: z + 0.55, // mic ở phía khán giả một chút
+    spotX: x, spotZ: z + 0.1, // chỗ người hát đứng, ngay sau mic
+    ry: Math.PI,
+  };
+});
+
+// Độ cao sàn tại vị trí (x, z) — dùng để camera/avatar bước lên bậc thang và sân khấu
+export function floorHeight(x, z) {
+  for (const s of STAGES) {
+    if (Math.abs(x - s.x) <= s.w / 2 && Math.abs(z - s.z) <= s.d / 2) return s.height;
+  }
   if (z < ROWS_START_Z) return 0;
   const i = Math.min(ROWS - 1, Math.floor((z - ROWS_START_Z) / ROW_DEPTH));
   return (i + 1) * ROW_RISE;
@@ -149,6 +169,44 @@ export function buildCinema(scene, { lowQuality = false } = {}) {
     }
   }
   scene.add(bases, cushions, backs, arms);
+
+  // Sân khấu: bục gỗ có vạch sáng ở mép trước, 1 mic đứng và 2 loa ở 2 góc phía khán giả
+  const stageMat = new THREE.MeshLambertMaterial({ color: 0x4a3426 });
+  const speakerMat = new THREE.MeshLambertMaterial({ color: 0x17171c });
+  const coneMat = new THREE.MeshLambertMaterial({ color: 0x55555e });
+  const micMat = new THREE.MeshLambertMaterial({ color: 0x222228 });
+  const micHeadMat = new THREE.MeshLambertMaterial({ color: 0xb0b4bc });
+  const speakerGeo = new THREE.BoxGeometry(0.6, 1.1, 0.5);
+  const wooferGeo = new THREE.CylinderGeometry(0.2, 0.2, 0.03, 20).rotateX(Math.PI / 2); // trục hướng về +z (phía khán giả)
+  const tweeterGeo = new THREE.CylinderGeometry(0.07, 0.07, 0.03, 16).rotateX(Math.PI / 2);
+  const micBaseGeo = new THREE.CylinderGeometry(0.14, 0.16, 0.03, 20);
+  const micPoleGeo = new THREE.CylinderGeometry(0.012, 0.012, 1.4, 8);
+  const micHeadGeo = new THREE.SphereGeometry(0.045, 12, 8);
+  const addMesh = (geo, mat, x, y, z) => {
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(x, y, z);
+    scene.add(mesh);
+  };
+
+  for (const s of STAGES) {
+    const top = s.height;
+    addMesh(new THREE.BoxGeometry(s.w, top, s.d), stageMat, s.x, top / 2, s.z);
+    addMesh(new THREE.BoxGeometry(s.w, 0.04, 0.08), stepEdgeMat, s.x, top, s.z + s.d / 2 - 0.04); // mép trước
+
+    // mic đứng: đế, cột, đầu mic
+    addMesh(micBaseGeo, micMat, s.micX, top + 0.015, s.micZ);
+    addMesh(micPoleGeo, micMat, s.micX, top + 0.03 + 0.7, s.micZ);
+    addMesh(micHeadGeo, micHeadMat, s.micX, top + 1.46, s.micZ);
+
+    // 2 loa ở 2 góc phía khán giả: thùng loa, loa trầm (to) và loa treble (nhỏ) hướng ra phòng
+    for (const side of [-1, 1]) {
+      const sx = s.x + side * (s.w / 2 - 0.4);
+      const sz = s.z + s.d / 2 - 0.35;
+      addMesh(speakerGeo, speakerMat, sx, top + 0.55, sz);
+      addMesh(wooferGeo, coneMat, sx, top + 0.38, sz + 0.265);
+      addMesh(tweeterGeo, coneMat, sx, top + 0.85, sz + 0.265);
+    }
+  }
 
   // Ánh sáng: ít đèn cho nhẹ. Chỉ 2 đèn trần ở cuối phòng (xa màn hình nhất), ánh sáng ấm nhẹ
   scene.add(new THREE.AmbientLight(0xffffff, lowQuality ? LOW_QUALITY_AMBIENT_INTENSITY : AMBIENT_INTENSITY));

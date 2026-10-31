@@ -70,7 +70,7 @@ const cssScene = new THREE.Scene();
 const NO_CSS = new URLSearchParams(location.search).has('nocss');
 if (NO_CSS) document.getElementById('css-layer').style.display = 'none';
 
-buildCinema(scene, { lowQuality });
+const cinema = buildCinema(scene, { lowQuality });
 
 // Màn hình video: div thu nhỏ cho khớp màn hình 3D. Chế độ thấp dùng 480p để YouTube
 // gửi video nhẹ hơn (giải mã video bằng CPU rất tốn trên máy không có tăng tốc phần cứng)
@@ -349,6 +349,7 @@ function joinRoom(profile) {
         if (p.seat !== null) seatOwners.set(p.seat, p.id);
         if (p.stage !== null) stageOwners.set(p.stage, p.id);
       });
+      syncStageLights(); // vào giữa lúc có người đang hát thì đèn đã sáng sẵn
       voice.setRoster(id, others.map((p) => p.id), iceServers);
       for (const f of followers) f.loadedVideoId = null; // kết nối lại: nạp lại từ đầu theo trạng thái server
       setDesired(video);
@@ -382,6 +383,7 @@ function joinRoom(profile) {
     onStage: ({ id, stage }) => {
       for (const [index, owner] of stageOwners) if (owner === id) stageOwners.delete(index);
       if (stage !== null) stageOwners.set(stage, id);
+      syncStageLights();
       if (id !== myId) return;
       const previous = myStage;
       myStage = stage;
@@ -407,6 +409,7 @@ function joinRoom(profile) {
       stunTimers.delete(id);
       for (const [index, owner] of seatOwners) if (owner === id) seatOwners.delete(index);
       for (const [index, owner] of stageOwners) if (owner === id) stageOwners.delete(index);
+      syncStageLights(); // người đang hát rời phòng thì tắt đèn
       avatars.remove(id);
       voice.peerLeft(id);
       if (names.has(id)) addChatLine(`${names.get(id)} rời rạp`, { system: true });
@@ -427,6 +430,7 @@ function joinRoom(profile) {
         names.clear();
         seatOwners.clear();
         stageOwners.clear();
+        syncStageLights();
         mySeat = null;
         myStage = null;
         stopKaraoke();
@@ -511,6 +515,10 @@ function nearestFreeSeat() {
 // Hát thì đứng im sau mic như ngồi ghế; tiếng của người hát vang toàn phòng, không theo luật gần xa.
 const STAGE_REACH = 3; // m: cách chỗ đứng hát trong khoảng này mới thấy nút "Hát"
 const stageOwners = new Map(); // chỉ số sân khấu -> id người đang hát
+// Đèn sân khấu sáng khi và chỉ khi có người đang hát ở sân khấu đó (ai trong phòng cũng thấy)
+function syncStageLights() {
+  STAGES.forEach((_, i) => cinema.setStageLight(i, stageOwners.has(i)));
+}
 let myStage = null; // sân khấu mình đang hát (đã được server xác nhận)
 let micBeforeSing = false; // trước khi hát mic đang bật hay tắt, để trả lại khi hát xong
 
@@ -911,6 +919,7 @@ function animate() {
   }
 
   avatars.update(dt);
+  cinema.updateEffects(dt); // đèn sân khấu sáng/tắt dần
   const shaking = isStunned();
   if (shaking) {
     applyShake(now);

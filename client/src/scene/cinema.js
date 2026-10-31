@@ -15,6 +15,17 @@ const AMBIENT_INTENSITY = 0.3;
 const WALL_PHOTO_URL = '/wall-photo.jpg';
 const WALL_PHOTO_HEIGHT = 1.96; // m; chiều rộng tính theo tỉ lệ ảnh. Bằng nửa kích cỡ lúc treo trên trần (~3.9 m)
 
+// Đèn sân khấu: mỗi sân khấu có một đèn treo ngay trên đầu người hát, chỉ sáng khi có người hát (setStageLight).
+// Gồm chùm sáng hình nón + vòng sáng tròn trên sàn sân khấu (giả bằng hình trong suốt cộng sáng, rất nhẹ);
+// chế độ chất lượng cao có thêm một SpotLight thật để rọi sáng cả người hát.
+const STAGE_LAMP_HEIGHT = 6.2; // m, từ mặt sàn phòng tới đèn
+const STAGE_BEAM_RADIUS = 1.0; // m, bán kính chùm sáng chạm sàn sân khấu
+const STAGE_POOL_RADIUS = 1.2; // m, bán kính vòng sáng trên sàn
+const STAGE_LIGHT_COLOR = 0xfff1d6; // trắng ấm
+const STAGE_BEAM_OPACITY = 0.3;
+const STAGE_POOL_OPACITY = 0.75;
+const STAGE_SPOT_INTENSITY = 50; // cường độ SpotLight thật (chỉ chế độ chất lượng cao)
+
 // Chế độ chất lượng thấp (máy không có tăng tốc đồ hoạ): bỏ đèn trần, bù bằng ánh sáng nền mạnh hơn
 const LOW_QUALITY_AMBIENT_INTENSITY = 1.2;
 
@@ -216,6 +227,16 @@ export function buildCinema(scene, { lowQuality = false } = {}) {
     scene.add(mesh);
   };
 
+  // Hình dùng chung cho đèn sân khấu: chùm sáng đậm ở đèn rồi nhạt dần xuống sàn; vòng sáng tròn mờ dần ra mép
+  const beamTexture = makeVerticalGlowTexture();
+  const poolTexture = makeRadialGlowTexture();
+  const rodGeo = new THREE.CylinderGeometry(0.015, 0.015, ROOM.height - STAGE_LAMP_HEIGHT, 6);
+  const lampBodyGeo = new THREE.CylinderGeometry(0.2, 0.26, 0.35, 16);
+  const lensGeo = new THREE.CircleGeometry(0.2, 20).rotateX(Math.PI / 2); // mặt kính hướng xuống
+  const LENS_OFF = new THREE.Color(0x2a2a30);
+  const LENS_ON = new THREE.Color(STAGE_LIGHT_COLOR);
+  const stageLights = []; // theo thứ tự STAGES: { target, level, beam, pool, beamMat, poolMat, lensMat, spot }
+
   for (const s of STAGES) {
     const top = s.height;
     addMesh(new THREE.BoxGeometry(s.w, top, s.d), stageMat, s.x, top / 2, s.z);
@@ -253,6 +274,43 @@ export function buildCinema(scene, { lowQuality = false } = {}) {
     const poleLength = MONITOR_CENTER_Y - 0.1;
     addMesh(new THREE.CylinderGeometry(0.02, 0.02, poleLength, 10), micMat, m.x, top + poleLength / 2, m.z + 0.06);
     addMesh(new THREE.CylinderGeometry(0.2, 0.22, 0.03, 20), micMat, m.x, top + 0.015, m.z + 0.06);
+
+    // Đèn sân khấu: đèn treo bằng 2 thanh từ trần, ngay trên đầu người hát; mặt kính sáng lên khi bật
+    const lampY = STAGE_LAMP_HEIGHT;
+    for (const dx of [-0.15, 0.15]) addMesh(rodGeo, micMat, s.spotX + dx, (lampY + ROOM.height) / 2 + 0.17, s.spotZ);
+    addMesh(lampBodyGeo, micMat, s.spotX, lampY + 0.175, s.spotZ);
+    const lensMat = new THREE.MeshBasicMaterial({ color: LENS_OFF });
+    addMesh(lensGeo, lensMat, s.spotX, lampY - 0.002, s.spotZ);
+
+    // chùm sáng: hình nón (đỉnh ở đèn, đáy chạm sàn sân khấu). Chỉ vẽ mặt ngoài, nên đứng trong chùm sáng
+    // (người hát) không bị phủ một lớp sương mờ lên màn hình
+    const beamHeight = lampY - top;
+    const beamMat = new THREE.MeshBasicMaterial({
+      map: beamTexture, color: STAGE_LIGHT_COLOR, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const beam = new THREE.Mesh(new THREE.ConeGeometry(STAGE_BEAM_RADIUS, beamHeight, 40, 1, true), beamMat);
+    beam.position.set(s.spotX, top + beamHeight / 2, s.spotZ);
+    const poolMat = new THREE.MeshBasicMaterial({
+      map: poolTexture, color: STAGE_LIGHT_COLOR, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const pool = new THREE.Mesh(new THREE.CircleGeometry(STAGE_POOL_RADIUS, 48).rotateX(-Math.PI / 2), poolMat);
+    pool.position.set(s.spotX, top + 0.015, s.spotZ);
+    beam.visible = false;
+    pool.visible = false;
+    scene.add(beam, pool);
+
+    // SpotLight thật rọi xuống người hát (chỉ chế độ chất lượng cao). Luôn có mặt, chỉ đổi cường độ (từ 0),
+    // vì thêm/bớt đèn giữa chừng làm trình duyệt phải biên dịch lại cảnh và bị giật.
+    let spot = null;
+    if (!lowQuality) {
+      spot = new THREE.SpotLight(STAGE_LIGHT_COLOR, 0, 0, Math.atan(STAGE_BEAM_RADIUS / beamHeight), 0.45, 2);
+      spot.position.set(s.spotX, lampY - 0.1, s.spotZ);
+      spot.target.position.set(s.spotX, top + 0.9, s.spotZ);
+      scene.add(spot, spot.target);
+    }
+    stageLights.push({ target: 0, level: 0, beam, pool, beamMat, poolMat, lensMat, spot });
   }
 
   // Ánh sáng: ít đèn cho nhẹ. Chỉ 2 đèn trần ở cuối phòng (xa màn hình nhất), ánh sáng ấm nhẹ
@@ -277,5 +335,56 @@ export function buildCinema(scene, { lowQuality = false } = {}) {
     scene.add(light);
   }
 
-  return { screen };
+  return {
+    screen,
+
+    // Bật/tắt đèn sân khấu số `index` (sáng/tắt dần êm, xem updateEffects)
+    setStageLight(index, on) {
+      if (stageLights[index]) stageLights[index].target = on ? 1 : 0;
+    },
+
+    // Gọi mỗi khung hình: làm đèn sân khấu sáng lên / tắt đi từ từ
+    updateEffects(dt) {
+      for (const l of stageLights) {
+        if (l.level === l.target) continue;
+        l.level += (l.target - l.level) * Math.min(1, dt * 6);
+        if (Math.abs(l.target - l.level) < 0.005) l.level = l.target;
+        const visible = l.level > 0;
+        l.beam.visible = visible;
+        l.pool.visible = visible;
+        l.beamMat.opacity = STAGE_BEAM_OPACITY * l.level;
+        l.poolMat.opacity = STAGE_POOL_OPACITY * l.level;
+        l.lensMat.color.copy(LENS_OFF).lerp(LENS_ON, l.level);
+        if (l.spot) l.spot.intensity = STAGE_SPOT_INTENSITY * l.level;
+      }
+    },
+  };
+}
+
+// Hình chùm sáng: đậm ở trên (gần đèn), nhạt dần xuống dưới. Ghép vào hình nón: phía trên ảnh ứng với đỉnh nón.
+function makeVerticalGlowTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 8;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  const g = ctx.createLinearGradient(0, 0, 0, 256);
+  g.addColorStop(0, 'rgba(255, 244, 214, 1)');
+  g.addColorStop(1, 'rgba(255, 244, 214, 0.18)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 8, 256);
+  return new THREE.CanvasTexture(canvas);
+}
+
+// Hình vòng sáng tròn: sáng ở tâm, mờ dần ra mép
+function makeRadialGlowTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+  g.addColorStop(0, 'rgba(255, 244, 214, 0.95)');
+  g.addColorStop(0.6, 'rgba(255, 244, 214, 0.65)');
+  g.addColorStop(1, 'rgba(255, 244, 214, 0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(canvas);
 }

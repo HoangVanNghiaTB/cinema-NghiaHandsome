@@ -8,6 +8,13 @@ import { Server } from 'socket.io';
 const PORT = process.env.PORT || 3000;
 const MAX_PLAYERS = 10;
 const SEAT_COUNT = 18; // phải khớp SEATS.length ở client/src/scene/cinema.js
+
+// Đánh nhau: server kiểm tra tầm đánh, hướng nhìn và thời gian chờ để không ai gian lận hay spam
+const PUNCH_RANGE = 1.8; // m
+const PUNCH_FRONT_COS = 0.5; // mục tiêu phải nằm trong góc ±60° phía trước người đánh
+const PUNCH_COOLDOWN_MS = 1000;
+const STUN_MS = 2000;
+const STUN_IMMUNE_MS = 1000; // sau khi hết choáng được miễn nhiễm một lúc, tránh bị khoá liên tục
 const isProd = process.env.NODE_ENV === 'production';
 
 // Máy chủ STUN/TURN cho voice chat. TURN (tuỳ chọn) cần cho các mạng không nối trực tiếp được (4G, mạng công ty).
@@ -86,6 +93,9 @@ io.on('connection', (socket) => {
       z: -4,
       ry: 0,
       seat: null, // chỉ số ghế đang ngồi, hoặc null
+      lastPunchAt: 0,
+      stunnedUntil: 0,
+      immuneUntil: 0,
     };
     players.set(socket.id, player);
     socket.emit('init', {
@@ -127,6 +137,38 @@ io.on('connection', (socket) => {
     if (!p || p.seat === null) return;
     p.seat = null;
     io.emit('seat-update', { id: p.id, seat: null });
+  });
+
+  // Đánh: người gần nhất ở phía trước trong tầm đánh bị choáng; đang ngồi thì bị văng khỏi ghế
+  socket.on('punch', () => {
+    const p = players.get(socket.id);
+    if (!p) return;
+    const now = Date.now();
+    if (now - p.lastPunchAt < PUNCH_COOLDOWN_MS || now < p.stunnedUntil) return;
+    p.lastPunchAt = now;
+
+    const fx = -Math.sin(p.ry);
+    const fz = -Math.cos(p.ry);
+    let target = null;
+    let best = PUNCH_RANGE;
+    for (const o of players.values()) {
+      if (o.id === p.id || now < o.immuneUntil) continue;
+      const dx = o.x - p.x;
+      const dz = o.z - p.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist >= best || (dist > 0 && (dx * fx + dz * fz) / dist < PUNCH_FRONT_COS)) continue;
+      target = o;
+      best = dist;
+    }
+    if (!target) return;
+
+    target.stunnedUntil = now + STUN_MS;
+    target.immuneUntil = target.stunnedUntil + STUN_IMMUNE_MS;
+    if (target.seat !== null) {
+      target.seat = null;
+      io.emit('seat-update', { id: target.id, seat: null });
+    }
+    io.emit('stun', { id: target.id, by: p.id, duration: STUN_MS });
   });
 
   // Chuyển tiếp tín hiệu WebRTC (voice chat) giữa hai người trong phòng

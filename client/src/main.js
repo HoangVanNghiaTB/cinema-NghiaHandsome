@@ -287,7 +287,10 @@ function joinRoom(profile) {
       }
     },
     onSeatDenied: () => addChatLine('Ghế này đã có người ngồi.', { system: true }),
+    onStun: ({ id, duration }) => startStun(id, duration),
     onLeave: (id) => {
+      clearTimeout(stunTimers.get(id));
+      stunTimers.delete(id);
       for (const [index, owner] of seatOwners) if (owner === id) seatOwners.delete(index);
       avatars.remove(id);
       voice.peerLeft(id);
@@ -309,6 +312,9 @@ function joinRoom(profile) {
         names.clear();
         seatOwners.clear();
         mySeat = null;
+        stunUntil = 0;
+        stunOverlay.classList.remove('show');
+        controls.pointerSpeed = 1;
         voice.reset();
         setNetStatus('○ Mất kết nối, đang thử lại...');
         msg.textContent = 'Mất kết nối tới server, đang thử lại...';
@@ -383,7 +389,7 @@ function nearestFreeSeat() {
 }
 
 function toggleSit() {
-  if (!room || !myId) return;
+  if (!room || !myId || isStunned()) return;
   if (mySeat !== null) {
     room.stand();
     return;
@@ -416,6 +422,45 @@ function updateSitPrompt() {
   }
 }
 
+// Đánh nhau: server quyết định ai trúng đòn. Bị choáng thì không đi, không xoay, không đánh/ngồi được trong vài giây.
+const PUNCH_COOLDOWN_MS = 1000; // khớp server, chỉ để đỡ gửi thừa
+let stunUntil = 0;
+let lastPunchAt = 0;
+const stunOverlay = $('stun-stars');
+const stunTimers = new Map(); // id người khác -> hẹn giờ hết choáng
+const isStunned = () => performance.now() < stunUntil;
+
+function startStun(id, duration) {
+  if (id === myId) {
+    stunUntil = performance.now() + duration;
+    stunOverlay.classList.add('show'); // sao quay giữa màn hình
+    controls.pointerSpeed = 0; // chuột không xoay được nữa
+    setTimeout(() => {
+      if (isStunned()) return;
+      stunOverlay.classList.remove('show');
+      controls.pointerSpeed = 1;
+    }, duration + 20);
+    return;
+  }
+  avatars.setStunned(id, true); // người khác thấy sao trên đầu
+  clearTimeout(stunTimers.get(id));
+  stunTimers.set(
+    id,
+    setTimeout(() => {
+      avatars.setStunned(id, false);
+      stunTimers.delete(id);
+    }, duration)
+  );
+}
+
+function punch() {
+  if (!room || !myId || isStunned()) return;
+  const now = performance.now();
+  if (now - lastPunchAt < PUNCH_COOLDOWN_MS) return;
+  lastPunchAt = now;
+  room.punch();
+}
+
 // Điều khiển góc nhìn thứ nhất: máy tính dùng chuột + phím (khoá con trỏ), điện thoại dùng cảm ứng
 const controls = new PointerLockControls(camera, document.body);
 const keys = new Set();
@@ -434,6 +479,7 @@ const LOOK_SENSITIVITY = 0.005; // rad mỗi px khi kéo ngón tay
 const touch = isTouch
   ? createTouchControls({
       onLook: (dx, dy) => {
+        if (isStunned()) return;
         yaw -= dx * LOOK_SENSITIVITY;
         pitch = THREE.MathUtils.clamp(pitch - dy * LOOK_SENSITIVITY, -1.4, 1.4);
         camera.rotation.set(pitch, yaw, 0);
@@ -442,6 +488,7 @@ const touch = isTouch
       onMic: () => (voiceMode === null ? startVoice() : toggleMic()),
       onChat: () => startChat(),
       onSit: toggleSit,
+      onPunch: punch,
     })
   : null;
 
@@ -487,10 +534,14 @@ addEventListener('keydown', (e) => {
   if (!controls.isLocked) return;
   if (e.code === 'KeyM' && !e.repeat) toggleMic();
   else if (e.code === 'KeyE' && !e.repeat) toggleSit();
+  else if (e.code === 'KeyF' && !e.repeat) punch();
   else if (e.code === 'Enter' && !e.repeat) startChat();
   else keys.add(e.code);
 });
 addEventListener('keyup', (e) => keys.delete(e.code));
+addEventListener('mousedown', (e) => {
+  if (controls.isLocked && e.button === 0) punch(); // chuột trái khi đang trong rạp
+});
 
 if (isTouch) $('hint').textContent = 'Cần gạt bên trái để đi, kéo bên phải để nhìn quanh. Dùng các nút ở góc để ngồi, chat, mic.';
 
@@ -521,7 +572,7 @@ function animate() {
   const p = camera.position;
   const seat = mySeat !== null ? SEATS[mySeat] : null;
 
-  if (isActive()) {
+  if (isActive() && !isStunned()) {
     const forward = THREE.MathUtils.clamp(
       (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0) + (touch ? touch.move.y : 0), -1, 1);
     const right = THREE.MathUtils.clamp(

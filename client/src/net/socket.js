@@ -5,7 +5,8 @@ const SERVER_URL = import.meta.env.DEV ? `http://${location.hostname}:3000` : un
 
 // handlers: { onInit(id, players, video, iceServers), onJoin(player), onMove(data), onLeave(id), onFull(),
 //             onStatus(connected), onVideo({ videoId, playing, position }), onSignal(from, data),
-//             onChat({ id, name, text }), onSeat({ id, seat }), onSeatDenied() }
+//             onChat({ id, name, text }), onSeat({ id, seat }), onSeatDenied(),
+//             onStun({ id, by, duration }) }
 export function connectToRoom({ name, color }, handlers) {
   const socket = io(SERVER_URL);
 
@@ -18,6 +19,7 @@ export function connectToRoom({ name, color }, handlers) {
   socket.on('video-state', (v) => handlers.onVideo?.(v));
   socket.on('signal', ({ from, data }) => handlers.onSignal?.(from, data));
   socket.on('chat', (m) => handlers.onChat?.(m));
+  socket.on('stun', (d) => handlers.onStun?.(d));
   socket.on('seat-update', (d) => handlers.onSeat?.(d));
   socket.on('seat-denied', () => handlers.onSeatDenied?.());
   socket.on('player-joined', (p) => handlers.onJoin?.(p));
@@ -27,6 +29,7 @@ export function connectToRoom({ name, color }, handlers) {
 
   return {
     sendMove: (state) => socket.volatile.emit('move', state),
+    punch: () => socket.emit('punch'),
     sit: (seat) => socket.emit('sit', { seat }),
     stand: () => socket.emit('stand'),
     sendChat: (text) => socket.emit('chat', { text }),

@@ -4,7 +4,7 @@
 const JOY_RADIUS = 55; // px: quãng kéo cần gạt tối đa
 
 // onLook(dx, dy): độ dịch ngón tay (px) khi kéo nhìn quanh
-export function createTouchControls({ onLook, onMenu, onMic, onChat, onSit }) {
+export function createTouchControls({ onLook, onMenu, onMic, onChat, onSit, onPunch }) {
   const $ = (id) => document.getElementById(id);
   const root = $('touch-ui');
   const joy = $('joy');
@@ -103,6 +103,7 @@ export function createTouchControls({ onLook, onMenu, onMic, onChat, onSit }) {
   btnMic.addEventListener('click', onMic);
   $('btn-chat').addEventListener('click', onChat);
   btnSit.addEventListener('click', onSit);
+  $('btn-punch').addEventListener('click', onPunch);
 
   return {
     move,

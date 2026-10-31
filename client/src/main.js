@@ -4,7 +4,7 @@ import { CSS3DRenderer, CSS3DObject } from 'three/examples/jsm/renderers/CSS3DRe
 import { buildCinema, floorHeight, ROOM, SCREEN, SEATS } from './scene/cinema.js';
 import { createTouchControls } from './ui/touch.js';
 import { StunRing } from './scene/stunRing.js';
-import { createFootsteps, STEP_LENGTH } from './audio/footsteps.js';
+import { createSounds, STEP_LENGTH } from './audio/sounds.js';
 import { createYouTubePlayer, parseVideoId } from './player/youtube.js';
 import { Avatars } from './scene/avatars.js';
 import { connectToRoom } from './net/socket.js';
@@ -20,7 +20,7 @@ const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 10
 camera.position.set(0, 1.6, -4);
 camera.rotation.order = 'YXZ'; // rotation.y là góc quay ngang thật sự, kể cả khi ngước/cúi
 scene.add(camera); // để các vật gắn vào camera (vòng sao choáng) được vẽ
-const footsteps = createFootsteps(camera); // tiếng bước chân; camera là "tai" người nghe
+const sounds = createSounds(camera); // tiếng bước chân, tiếng tát; camera là "tai" người nghe
 
 // Chất lượng đồ hoạ: 'auto' (mặc định) | 'low' | 'high'. Tự động chọn thấp nếu trình duyệt chỉ có đồ hoạ phần mềm
 // (không có tăng tốc card đồ hoạ), để người dùng không phải sửa máy mới xem được mượt.
@@ -165,7 +165,7 @@ $('pause').addEventListener('click', () => room.pauseVideo(currentTime()));
 $('back').addEventListener('click', () => room.seekVideo(Math.max(0, currentTime() - 10)));
 $('forward').addEventListener('click', () => room.seekVideo(currentTime() + 10));
 
-const avatars = new Avatars(scene, { onStep: (x, z) => footsteps.playAt(x, z) });
+const avatars = new Avatars(scene, { onStep: (x, z) => sounds.playStepAt(x, z) });
 let myId = null;
 const names = new Map(); // id -> tên, để báo ai vào/rời phòng
 
@@ -435,6 +435,10 @@ const stunTimers = new Map(); // id người khác -> hẹn giờ hết choáng
 const isStunned = () => performance.now() < stunUntil;
 
 function startStun(id, duration) {
+  // Server báo đòn đã trúng: cả phòng nghe tiếng tát tại chỗ người bị đánh (xa thì nhỏ)
+  const victim = id === myId ? camera.position : avatars.items.get(id)?.group.position;
+  if (victim) sounds.playSlapAt(victim.x, victim.z);
+
   if (id === myId) {
     stunUntil = performance.now() + duration;
     stunRing.show();
@@ -529,7 +533,7 @@ function setActive(active) {
 }
 
 $('enter').addEventListener('click', () => {
-  footsteps.unlock(); // trình duyệt chỉ cho phát âm thanh sau một thao tác bấm
+  sounds.unlock(); // trình duyệt chỉ cho phát âm thanh sau một thao tác bấm
   if (isTouch) {
     setActive(true);
     // Toàn màn hình cho rộng chỗ, rồi khoá ngang (Android Chrome cho khoá khi đang toàn màn hình; iPhone thì không,
@@ -630,7 +634,7 @@ function animate() {
     ownStepDist += walked;
     if (ownStepDist >= STEP_LENGTH) {
       ownStepDist -= STEP_LENGTH;
-      footsteps.playAt(p.x, p.z);
+      sounds.playStepAt(p.x, p.z);
     }
   }
   updateSitPrompt();

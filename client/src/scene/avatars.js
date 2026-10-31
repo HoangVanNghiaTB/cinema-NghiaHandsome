@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { STEP_LENGTH } from '../audio/footsteps.js';
+import { STEP_LENGTH } from '../audio/sounds.js';
 
 const BODY_LENGTH = 1.0;
 const BODY_RADIUS = 0.3;

@@ -7,6 +7,7 @@ import { Server } from 'socket.io';
 
 const PORT = process.env.PORT || 3000;
 const MAX_PLAYERS = 10;
+const SEAT_COUNT = 18; // phải khớp SEATS.length ở client/src/scene/cinema.js
 const isProd = process.env.NODE_ENV === 'production';
 
 // Máy chủ STUN/TURN cho voice chat. TURN (tuỳ chọn) cần cho các mạng không nối trực tiếp được (4G, mạng công ty).
@@ -84,6 +85,7 @@ io.on('connection', (socket) => {
       y: 0,
       z: -4,
       ry: 0,
+      seat: null, // chỉ số ghế đang ngồi, hoặc null
     };
     players.set(socket.id, player);
     socket.emit('init', {
@@ -103,6 +105,28 @@ io.on('connection', (socket) => {
     p.z = num(data.z);
     p.ry = num(data.ry);
     socket.volatile.broadcast.emit('player-moved', { id: p.id, x: p.x, y: p.y, z: p.z, ry: p.ry });
+  });
+
+  // Ngồi ghế: server quyết định ghế còn trống hay không (một ghế một người)
+  socket.on('sit', (data = {}) => {
+    const p = players.get(socket.id);
+    if (!p) return;
+    const seat = data.seat;
+    const valid = Number.isInteger(seat) && seat >= 0 && seat < SEAT_COUNT;
+    const taken = valid && [...players.values()].some((o) => o.id !== p.id && o.seat === seat);
+    if (!valid || taken) {
+      socket.emit('seat-denied');
+      return;
+    }
+    p.seat = seat;
+    io.emit('seat-update', { id: p.id, seat });
+  });
+
+  socket.on('stand', () => {
+    const p = players.get(socket.id);
+    if (!p || p.seat === null) return;
+    p.seat = null;
+    io.emit('seat-update', { id: p.id, seat: null });
   });
 
   // Chuyển tiếp tín hiệu WebRTC (voice chat) giữa hai người trong phòng

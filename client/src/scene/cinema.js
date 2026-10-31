@@ -1,13 +1,26 @@
 import * as THREE from 'three';
 
 // Kích thước phòng (đơn vị: mét)
-export const ROOM = { minX: -10, maxX: 10, minZ: -15, maxZ: 12, height: 9 };
-export const SCREEN = { width: 12.8, height: 7.2, y: 4.8, z: -14.9 }; // 16:9
+export const ROOM = { minX: -10, maxX: 10, minZ: -11, maxZ: 7, height: 9 };
+export const SCREEN = { width: 12.8, height: 7.2, y: 4.8, z: ROOM.minZ + 0.1 }; // 16:9, sát tường trước
 
 // Độ sáng mỗi đèn trần (tăng/giảm ở đây nếu thấy tối/sáng quá)
 const CEILING_LIGHT_INTENSITY = 60;
 
-const ROWS = 6;
+// Ánh sáng nền chiếu đều cả phòng, kể cả gần màn hình nơi đèn trần không với tới.
+// 0.2 cũ + thêm ~1/10 độ sáng một đèn trần ở khoảng cách ghế (~60 / 8² ≈ 0.94, 1/10 ≈ 0.09)
+const AMBIENT_INTENSITY = 0.3;
+
+// Ảnh treo tường sau (file nằm ở client/public)
+const WALL_PHOTO_URL = '/wall-photo.jpg';
+const WALL_PHOTO_HEIGHT = 1.96; // m; chiều rộng tính theo tỉ lệ ảnh. Bằng nửa kích cỡ lúc treo trên trần (~3.9 m)
+
+// Chế độ chất lượng thấp (máy không có tăng tốc đồ hoạ): bỏ đèn trần, bù bằng ánh sáng nền mạnh hơn
+const LOW_QUALITY_AMBIENT_INTENSITY = 1.2;
+
+// 18 ghế: 3 hàng, mỗi hàng chia 2 cột (trái/phải) cách nhau lối đi giữa, mỗi cột 3 ghế
+const ROWS = 3;
+const SEAT_XS = [-3, -2, -1, 1, 2, 3];
 const ROW_DEPTH = 2;
 const ROW_RISE = 0.4;
 const ROWS_START_Z = -1; // hàng đầu bắt đầu từ đây
@@ -19,11 +32,25 @@ export function floorHeight(z) {
   return (i + 1) * ROW_RISE;
 }
 
-export function buildCinema(scene) {
-  const darkWall = new THREE.MeshStandardMaterial({ color: 0x15151a });
-  const floorMat = new THREE.MeshStandardMaterial({ color: 0x1c1c22 });
-  const stepMat = new THREE.MeshStandardMaterial({ color: 0x24242c });
-  const seatMat = new THREE.MeshStandardMaterial({ color: 0x7a1f2b });
+// Vị trí từng ghế (theo thứ tự hàng rồi cột): x, z là tâm ghế; y là mặt nệm; floorY là mặt bậc bên dưới.
+// Server cũng dùng số lượng ghế này (SEAT_COUNT trong server/index.js), nhớ sửa cả hai nếu đổi bố cục.
+const CUSHION_HEIGHT = 0.4; // mặt nệm cao hơn mặt bậc
+export const SEATS = [];
+for (let i = 0; i < ROWS; i++) {
+  const floorY = (i + 1) * ROW_RISE;
+  const z = ROWS_START_Z + i * ROW_DEPTH + ROW_DEPTH / 2;
+  for (const x of SEAT_XS) SEATS.push({ x, y: floorY + CUSHION_HEIGHT, z: z - 0.02, floorY });
+}
+
+export function buildCinema(scene, { lowQuality = false } = {}) {
+  // Lambert rẻ hơn PBR nhiều khi có nhiều đèn, mà nhìn gần như nhau với bề mặt nhám
+  const darkWall = new THREE.MeshLambertMaterial({ color: 0x15151a }); // trần
+  const wallMat = new THREE.MeshLambertMaterial({ color: 0x2b3a5c }); // tường: xanh navy xám, tương phản với sàn đỏ
+  const floorMat = new THREE.MeshLambertMaterial({ color: 0x770000 });
+  const stepMat = new THREE.MeshLambertMaterial({ color: 0x24242c });
+  const stepEdgeMat = new THREE.MeshBasicMaterial({ color: 0xc9a66b }); // vạch sáng ở mép bậc, không phụ thuộc ánh sáng
+  const seatMat = new THREE.MeshLambertMaterial({ color: 0xd9b98a }); // nệm và lưng tựa: màu cát sáng, nổi trên sàn đỏ
+  const seatTrimMat = new THREE.MeshLambertMaterial({ color: 0x9aa0ab }); // chân đế, tay vịn: xám sáng, tách khỏi bậc thang tối và sàn đỏ
 
   const w = ROOM.maxX - ROOM.minX;
   const d = ROOM.maxZ - ROOM.minZ;
@@ -41,9 +68,22 @@ export function buildCinema(scene) {
   ceiling.position.set(cx, ROOM.height, cz);
   scene.add(ceiling);
 
+  // Ảnh treo giữa bức tường sau (đối diện màn hình), giữ nguyên tỉ lệ ảnh
+  new THREE.TextureLoader().load(WALL_PHOTO_URL, (texture) => {
+    texture.colorSpace = THREE.SRGBColorSpace;
+    const aspect = texture.image.width / texture.image.height;
+    const photo = new THREE.Mesh(
+      new THREE.PlaneGeometry(WALL_PHOTO_HEIGHT * aspect, WALL_PHOTO_HEIGHT),
+      new THREE.MeshBasicMaterial({ map: texture, color: 0xdddddd }) // không phụ thuộc đèn, hơi dịu đi cho khỏi chói
+    );
+    photo.rotation.y = Math.PI; // quay mặt ảnh về phía màn hình/khán giả
+    photo.position.set(cx, ROOM.height / 2, ROOM.maxZ - 0.02); // sát tường, thụt ra chút để không bị chập mặt
+    scene.add(photo);
+  });
+
   // 4 bức tường (mặt trong hướng vào phòng)
   const wall = (width, x, z, rotY) => {
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(width, ROOM.height), darkWall);
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(width, ROOM.height), wallMat);
     m.position.set(x, ROOM.height / 2, z);
     m.rotation.y = rotY;
     scene.add(m);
@@ -66,9 +106,23 @@ export function buildCinema(scene) {
   scene.add(screen);
 
   // Bậc thang + ghế
-  const seatXs = [];
-  for (let x = -7; x <= 7; x++) if (x !== 0) seatXs.push(x); // chừa lối đi giữa
+  const seatXs = SEAT_XS;
   const rowZMax = ROOM.maxZ;
+
+  // Mỗi ghế gồm chân đế, nệm ngồi, lưng tựa (hơi ngả) và 2 tay vịn. Dùng InstancedMesh:
+  // mỗi bộ phận của toàn bộ ghế chỉ tốn 1 lệnh vẽ
+  const seatCount = ROWS * seatXs.length;
+  const bases = new THREE.InstancedMesh(new THREE.BoxGeometry(0.5, 0.25, 0.5), seatTrimMat, seatCount);
+  const cushions = new THREE.InstancedMesh(new THREE.BoxGeometry(0.7, 0.15, 0.65), seatMat, seatCount);
+  const backs = new THREE.InstancedMesh(new THREE.BoxGeometry(0.7, 0.65, 0.12), seatMat, seatCount);
+  const arms = new THREE.InstancedMesh(new THREE.BoxGeometry(0.08, 0.2, 0.55), seatTrimMat, seatCount * 2);
+  const m = new THREE.Matrix4();
+  const backTilt = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.15, 0, 0)); // ngả ra sau
+  const noRotation = new THREE.Quaternion();
+  const oneScale = new THREE.Vector3(1, 1, 1);
+  const place = (mesh, index, x, y, z, rotation = noRotation) =>
+    mesh.setMatrixAt(index, m.compose(new THREE.Vector3(x, y, z), rotation, oneScale));
+  let n = 0;
 
   for (let i = 0; i < ROWS; i++) {
     const z0 = ROWS_START_Z + i * ROW_DEPTH;
@@ -79,35 +133,44 @@ export function buildCinema(scene) {
     step.position.set(cx, top / 2, (z0 + z1) / 2);
     scene.add(step);
 
+    // Vạch sáng dọc mép trước của bậc để nhìn rõ độ cao từng bậc trong phòng tối
+    const edge = new THREE.Mesh(new THREE.BoxGeometry(w, 0.05, 0.1), stepEdgeMat);
+    edge.position.set(cx, top, z0 + 0.05);
+    scene.add(edge);
+
     const seatZ = z0 + ROW_DEPTH / 2;
     for (const x of seatXs) {
-      const seat = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.4, 0.7), seatMat);
-      seat.position.set(x, top + 0.2, seatZ);
-      scene.add(seat);
-      const back = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.6, 0.12), seatMat);
-      back.position.set(x, top + 0.7, seatZ + 0.32);
-      scene.add(back);
+      place(bases, n, x, top + 0.125, seatZ);
+      place(cushions, n, x, top + 0.325, seatZ - 0.02);
+      place(backs, n, x, top + 0.75, seatZ + 0.28, backTilt);
+      place(arms, n * 2, x - 0.39, top + 0.5, seatZ);
+      place(arms, n * 2 + 1, x + 0.39, top + 0.5, seatZ);
+      n++;
     }
   }
+  scene.add(bases, cushions, backs, arms);
 
-  // Ánh sáng: mờ tối + hắt từ màn hình
-  scene.add(new THREE.AmbientLight(0xffffff, 0.2));
+  // Ánh sáng: ít đèn cho nhẹ. Chỉ 2 đèn trần ở cuối phòng (xa màn hình nhất), ánh sáng ấm nhẹ
+  scene.add(new THREE.AmbientLight(0xffffff, lowQuality ? LOW_QUALITY_AMBIENT_INTENSITY : AMBIENT_INTENSITY));
 
-  // Đèn trần: 2 cột x 3 hàng, ánh sáng ấm nhẹ
+  if (lowQuality) {
+    // Một đèn hướng rẻ hơn đèn điểm nhiều, đủ để các mặt của ghế/tường có chỗ sáng chỗ tối, nhìn ra khối
+    const sun = new THREE.DirectionalLight(0xffffff, 1.5);
+    sun.position.set(2, 6, 4);
+    scene.add(sun);
+  }
+
   const fixtureMat = new THREE.MeshBasicMaterial({ color: 0xffe2b0 });
   for (const x of [-5, 5]) {
-    for (const z of [-6, 1, 8]) {
-      const fixture = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.08, 0.6), fixtureMat);
-      fixture.position.set(x, ROOM.height - 0.04, z);
-      scene.add(fixture);
-      const light = new THREE.PointLight(0xffe2b0, CEILING_LIGHT_INTENSITY, 18, 2);
-      light.position.set(x, ROOM.height - 0.6, z);
-      scene.add(light);
-    }
+    const z = ROOM.maxZ - 2; // gần tường sau, xa màn hình nhất
+    const fixture = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.08, 0.6), fixtureMat);
+    fixture.position.set(x, ROOM.height - 0.04, z);
+    scene.add(fixture);
+    if (lowQuality) continue; // chế độ nhẹ: không dùng đèn điểm (tốn tính toán từng điểm ảnh)
+    const light = new THREE.PointLight(0xffe2b0, CEILING_LIGHT_INTENSITY, 18, 2);
+    light.position.set(x, ROOM.height - 0.6, z);
+    scene.add(light);
   }
-  const glow = new THREE.PointLight(0xaabbff, 60, 30, 1.5);
-  glow.position.set(0, SCREEN.y, SCREEN.z + 2);
-  scene.add(glow);
 
   return { screen };
 }

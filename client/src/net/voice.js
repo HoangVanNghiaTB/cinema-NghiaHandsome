@@ -49,6 +49,7 @@ export function createVoice({ sendSignal, onSpeaking, getVolume }) {
     pc.onicecandidate = (e) => e.candidate && sendSignal(id, { type: 'candidate', candidate: e.candidate });
     pc.ontrack = (e) => attachRemote(id, peer, e.streams[0]);
     pc.onconnectionstatechange = () => {
+      console.info(`Voice: kết nối với ${id} -> ${pc.connectionState}`); // để chẩn đoán khi mất tiếng
       if (pc.connectionState === 'failed' && peers.get(id) === peer) closePeer(id);
     };
 
@@ -197,6 +198,13 @@ export function createVoice({ sendSignal, onSpeaking, getVolume }) {
         return mode;
       })();
       return starting;
+    },
+
+    // Số người đã nối voice thành công / số người khác trong phòng (để hiện lên màn hình khi chẩn đoán)
+    status() {
+      let connected = 0;
+      for (const peer of peers.values()) if (peer.pc.connectionState === 'connected') connected++;
+      return { connected, total: roster.size };
     },
 
     // Bắt đầu hát: gửi tiếng mic đã qua chuỗi hiệu ứng (echo, reverb...) thay cho tiếng mic thường.

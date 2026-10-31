@@ -246,10 +246,16 @@ const hud = $('voice-status');
 let voiceMode = null; // null (chưa bật) | 'mic' | 'listen-only'
 let micOn = false;
 function updateHud() {
-  if (voiceMode === null) hud.textContent = 'Voice: chưa bật';
-  else if (voiceMode === 'listen-only') hud.textContent = 'Voice: chỉ nghe (không có mic)';
-  else if (isTouch) hud.textContent = micOn ? 'Mic: BẬT' : 'Mic: tắt';
-  else hud.textContent = micOn ? 'Mic: BẬT (nhấn M để tắt)' : 'Mic: tắt (nhấn M để nói)';
+  if (voiceMode === null) {
+    hud.textContent = 'Voice: chưa bật';
+  } else {
+    // "nối x/y": x người đã nối voice được với mình trong y người khác ở trong phòng
+    const { connected, total } = voice.status();
+    const link = total > 0 ? ` · nối ${connected}/${total}` : '';
+    if (voiceMode === 'listen-only') hud.textContent = `Voice: chỉ nghe (không có mic)${link}`;
+    else if (isTouch) hud.textContent = (micOn ? 'Mic: BẬT' : 'Mic: tắt') + link;
+    else hud.textContent = (micOn ? 'Mic: BẬT (nhấn M để tắt)' : 'Mic: tắt (nhấn M để nói)') + link;
+  }
   touch?.setMicOn(micOn);
 }
 const voice = createVoice({
@@ -879,6 +885,7 @@ function animate() {
   const now = performance.now();
   if (now - fpsStart >= 1000) {
     const fps = Math.round((frames * 1000) / (now - fpsStart));
+    updateHud(); // làm mới trạng thái nối voice mỗi giây
     if (showFps) fpsEl.textContent = `${fps} FPS · ${renderer.info.render.calls} lệnh vẽ · độ nét ${pixelRatio.toFixed(2)}x${lowQuality ? ' · chế độ nhẹ' : ''}`;
     adaptResolution(fps, now);
     frames = 0;

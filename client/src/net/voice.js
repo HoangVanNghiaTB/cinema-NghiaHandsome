@@ -3,6 +3,9 @@
 // Quy trình: ai bật voice thì gửi 'hello' cho mọi người trong phòng. Khi hai bên đều đã bật,
 // bên có id nhỏ hơn tạo offer (tránh hai bên cùng offer một lúc).
 
+import { createVocalChain } from '../audio/vocalChain.js';
+
+const SING_BITRATE = 96000; // bit/giây; mặc định của WebRTC (~32k) hơi thấp cho tiếng hát có vang
 // Danh sách STUN/TURN do server gửi trong 'init' (setRoster); đây là giá trị dự phòng
 let rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 const SPEAK_THRESHOLD = 0.03; // RMS (0..1) coi là đang nói
@@ -15,6 +18,8 @@ export function createVoice({ sendSignal, onSpeaking, getVolume }) {
   let starting = null;
   let localStream = null;
   let audioCtx = null;
+  let singing = null; // { chain } khi đang hát: gửi tiếng đã qua hiệu ứng thay cho tiếng mic thường
+  let singingToken = 0; // để bỏ qua kết quả của lần bật hát đã bị dừng giữa chừng
   const roster = new Set(); // id những người khác trong phòng
   const readyPeers = new Set(); // đã nhận 'hello' từ họ
   const helloSentTo = new Set();
@@ -37,7 +42,8 @@ export function createVoice({ sendSignal, onSpeaking, getVolume }) {
     const peer = { pc, audio: null, gain: null, volume: null, analyser: null, speaking: false, lastLoud: 0 };
     peers.set(id, peer);
 
-    if (localStream) localStream.getTracks().forEach((t) => pc.addTrack(t, localStream));
+    if (singing) pc.addTrack(singing.chain.outTrack, singing.chain.outStream);
+    else if (localStream) localStream.getTracks().forEach((t) => pc.addTrack(t, localStream));
     else if (initiator) pc.addTransceiver('audio', { direction: 'recvonly' }); // không có mic: chỉ nghe
 
     pc.onicecandidate = (e) => e.candidate && sendSignal(id, { type: 'candidate', candidate: e.candidate });
@@ -97,6 +103,29 @@ export function createVoice({ sendSignal, onSpeaking, getVolume }) {
     peer.audio?.remove();
     peers.delete(id);
     if (peer.speaking) onSpeaking?.(id, false);
+  }
+
+  // Đổi luồng âm thanh đang gửi cho mọi người sang `track` (không cần kết nối lại), và đặt trần bit rate
+  function swapOutgoingTrack(track, maxBitrate) {
+    for (const peer of peers.values()) {
+      const sender = peer.pc.getSenders().find((s) => s.track && s.track.kind === 'audio');
+      if (!sender) continue; // người này không có mic (chỉ nghe) nên không có gì để đổi
+      sender.replaceTrack(track).catch((err) => console.warn('Voice: không đổi được luồng gửi', err));
+      try {
+        const params = sender.getParameters();
+        if (!params.encodings?.length) params.encodings = [{}];
+        if (maxBitrate) params.encodings[0].maxBitrate = maxBitrate;
+        else delete params.encodings[0].maxBitrate;
+        sender.setParameters(params).catch(() => {});
+      } catch {
+        // trình duyệt không cho chỉnh thì dùng mặc định
+      }
+    }
+  }
+
+  function restoreMicConstraints() {
+    const track = localStream?.getAudioTracks()[0];
+    track?.applyConstraints({ echoCancellation: true, noiseSuppression: true, autoGainControl: true }).catch(() => {});
   }
 
   function reset() {
@@ -168,6 +197,40 @@ export function createVoice({ sendSignal, onSpeaking, getVolume }) {
         return mode;
       })();
       return starting;
+    },
+
+    // Bắt đầu hát: gửi tiếng mic đã qua chuỗi hiệu ứng (echo, reverb...) thay cho tiếng mic thường.
+    // Người hát KHÔNG nghe lại giọng của chính mình. Bật/tắt mic (toggleMic) vẫn hoạt động như thường.
+    async startSinging() {
+      if (singing || !localStream || !audioCtx) return;
+      const token = ++singingToken;
+      const track = localStream.getAudioTracks()[0];
+      // Khi hát bỏ khử nhiễu và tự chỉnh âm lượng của trình duyệt (làm giọng kéo dài bị cắt, bơm lên xuống);
+      // giữ khử vọng vì không biết người hát dùng tai nghe hay loa.
+      try {
+        await track.applyConstraints({ echoCancellation: true, noiseSuppression: false, autoGainControl: false });
+      } catch (err) {
+        console.warn('Voice: không đổi được cấu hình mic khi hát', err);
+      }
+      if (token !== singingToken) {
+        restoreMicConstraints(); // đã dừng hát trong lúc chờ
+        return;
+      }
+      if (audioCtx.state === 'suspended') await audioCtx.resume().catch(() => {});
+      const chain = createVocalChain(audioCtx, track);
+      singing = { chain };
+      swapOutgoingTrack(chain.outTrack, SING_BITRATE);
+    },
+
+    // Hát xong: trả về mic thường
+    stopSinging() {
+      singingToken++;
+      if (!singing) return;
+      const { chain } = singing;
+      singing = null;
+      swapOutgoingTrack(localStream?.getAudioTracks()[0], null);
+      chain.dispose();
+      restoreMicConstraints();
     },
 
     // Bật/tắt mic; trả về true nếu đang bật. Không có mic thì trả về false.

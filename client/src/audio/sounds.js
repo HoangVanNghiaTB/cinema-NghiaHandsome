@@ -38,6 +38,7 @@ export function createSounds(listener) {
   let ctx = null;
   const buffers = {}; // tên âm thanh -> AudioBuffer (có sau khi tải xong)
   const lastPlayed = {}; // tên âm thanh -> chỉ số tiếng vừa phát, để không lặp liền nhau
+  let master = 1; // hệ số âm lượng chung do người dùng chỉnh (thanh "Hiệu ứng" trong menu)
   const right = new THREE.Vector3();
 
   async function load(name) {
@@ -59,7 +60,7 @@ export function createSounds(listener) {
     const dist = Math.hypot(dx, dz);
     if (dist >= sound.maxDistance) return;
     const falloff = 1 - dist / sound.maxDistance;
-    const gain = sound.maxGain * falloff * falloff; // giảm nhanh theo khoảng cách
+    const gain = sound.maxGain * falloff * falloff * master; // giảm nhanh theo khoảng cách
     if (gain < MIN_AUDIBLE_GAIN) return;
 
     // -1 = hoàn toàn bên trái, +1 = bên phải (theo hướng camera đang nhìn)
@@ -99,6 +100,10 @@ export function createSounds(listener) {
         Object.keys(SOUNDS).forEach(load);
       }
       if (ctx.state === 'suspended') ctx.resume();
+    },
+    // Hệ số âm lượng chung cho mọi hiệu ứng (1 = như thiết kế, 0 = tắt, 2 = gấp đôi)
+    setVolume(scale) {
+      master = Math.max(0, scale);
     },
     playStepAt: (x, z) => playAt('step', x, z),
     playSlapAt: (x, z) => playAt('slap', x, z),

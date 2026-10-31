@@ -90,6 +90,24 @@ const menu = $('menu');
 const msg = $('msg');
 let player = null;
 
+// Thanh âm lượng trong menu, nhớ cho lần sau. Mỗi thanh chỉ chỉnh âm lượng trên máy của chính mình.
+//   video: âm lượng trình phát YouTube (0-100)
+//   voice: âm lượng tối đa nghe người khác nói (0-100); mặc định 60 = mức thiết kế ban đầu (VOICE_MAX)
+//   effects: hiệu ứng bước chân, tát (% so với thiết kế, 0-200)
+const VOLUMES_KEY = 'cinema-volumes';
+const VOLUME_DEFAULTS = { video: 100, voice: 60, effects: 100 };
+const VOLUME_MAX = { video: 100, voice: 100, effects: 200 };
+const volumes = { ...VOLUME_DEFAULTS };
+try {
+  const saved = JSON.parse(localStorage.getItem(VOLUMES_KEY)) ?? {};
+  for (const key of Object.keys(volumes)) {
+    if (Number.isFinite(saved[key]) && saved[key] >= 0 && saved[key] <= VOLUME_MAX[key]) volumes[key] = saved[key];
+  }
+} catch {
+  // không đọc được thì dùng mặc định
+}
+sounds.setVolume(volumes.effects / 100);
+
 // Chọn chất lượng đồ hoạ trong menu; đổi thì tải lại trang để áp dụng
 const qualitySelect = $('quality');
 qualitySelect.value = qualitySetting;
@@ -101,6 +119,27 @@ qualitySelect.addEventListener('change', () => {
   }
   location.reload();
 });
+
+function applyVideoVolume() {
+  player?.setVolume(volumes.video);
+}
+for (const key of Object.keys(volumes)) {
+  const slider = $(`vol-${key}`);
+  const label = $(`vol-${key}-val`);
+  slider.value = volumes[key];
+  label.textContent = `${volumes[key]}%`;
+  slider.addEventListener('input', () => {
+    volumes[key] = Number(slider.value);
+    label.textContent = `${volumes[key]}%`;
+    if (key === 'video') applyVideoVolume();
+    if (key === 'effects') sounds.setVolume(volumes.effects / 100);
+    try {
+      localStorage.setItem(VOLUMES_KEY, JSON.stringify(volumes));
+    } catch {
+      // không lưu được thì thôi
+    }
+  });
+}
 
 // Ẩn/hiện dòng FPS ở góc trái trên (nhớ lựa chọn cho lần sau)
 const FPS_KEY = 'cinema-show-fps';
@@ -133,37 +172,45 @@ createYouTubePlayer(playerHost, {
   onError: (text) => (msg.textContent = text),
 }).then((p) => {
   player = p;
+  followers.push({ player: p, loadedVideoId: null, volume: () => volumes.video });
   applyDesired(); // người vào sau: player sẵn sàng thì bắt kịp video đang chiếu
 });
 
-// Đồng bộ video: `desired` là trạng thái mới nhất server gửi, đã tính cả thời gian trôi qua từ lúc nhận
+// Đồng bộ video: `desired` là trạng thái mới nhất server gửi, đã tính cả thời gian trôi qua từ lúc nhận.
+// Mọi trình phát trên máy này (màn hình to, và màn hình karaoke khi mình hát) đều bám theo `desired`.
 const SYNC_TOLERANCE = 2; // giây; lệch hơn thì tự tua lại (định kỳ)
 const EXPLICIT_TOLERANCE = 0.5; // khi có người tua/phát/dừng
 let desired = null;
-let loadedVideoId = null;
+const followers = []; // { player, loadedVideoId, volume(): 0..100 }
 
 const expectedPosition = () =>
   !desired ? 0 : desired.playing ? desired.position + (performance.now() - desired.receivedAt) / 1000 : desired.position;
 
-function applyDesired(tolerance = EXPLICIT_TOLERANCE) {
-  if (!player || !desired || !desired.videoId) return;
+function applyTo(follower, tolerance) {
+  if (!desired || !desired.videoId) return;
+  const p = follower.player;
   const pos = expectedPosition();
 
-  if (desired.videoId !== loadedVideoId) {
-    loadedVideoId = desired.videoId;
-    if (desired.playing) player.load(desired.videoId, pos);
-    else player.cue(desired.videoId, pos);
+  if (desired.videoId !== follower.loadedVideoId) {
+    follower.loadedVideoId = desired.videoId;
+    if (desired.playing) p.load(desired.videoId, pos);
+    else p.cue(desired.videoId, pos);
+    p.setVolume(follower.volume()); // đổi video xong giữ nguyên âm lượng đã chỉnh
     return;
   }
 
-  const state = player.getState(); // 0 hết, 1 phát, 2 dừng, 3 đệm, 5 đã nạp
+  const state = p.getState(); // 0 hết, 1 phát, 2 dừng, 3 đệm, 5 đã nạp
   if (state === 0) return;
-  if (Math.abs(player.getTime() - pos) > tolerance) {
-    player.seek(pos);
-    if (!desired.playing) player.pause();
+  if (Math.abs(p.getTime() - pos) > tolerance) {
+    p.seek(pos);
+    if (!desired.playing) p.pause();
   }
-  if (desired.playing && state !== 1 && state !== 3) player.play();
-  if (!desired.playing && state === 1) player.pause();
+  if (desired.playing && state !== 1 && state !== 3) p.play();
+  if (!desired.playing && state === 1) p.pause();
+}
+
+function applyDesired(tolerance = EXPLICIT_TOLERANCE) {
+  for (const follower of followers) applyTo(follower, tolerance);
 }
 
 function setDesired(video) {
@@ -284,6 +331,8 @@ function joinRoom(profile) {
       stageOwners.clear();
       mySeat = null;
       myStage = null;
+      stopKaraoke();
+      voice.stopSinging();
       others.forEach((p) => {
         avatars.add(p);
         names.set(p.id, p.name);
@@ -291,7 +340,7 @@ function joinRoom(profile) {
         if (p.stage !== null) stageOwners.set(p.stage, p.id);
       });
       voice.setRoster(id, others.map((p) => p.id), iceServers);
-      loadedVideoId = null; // kết nối lại: nạp lại từ đầu theo trạng thái server
+      for (const f of followers) f.loadedVideoId = null; // kết nối lại: nạp lại từ đầu theo trạng thái server
       setDesired(video);
     },
     onVideo: setDesired,
@@ -330,11 +379,15 @@ function joinRoom(profile) {
         micBeforeSing = micOn;
         setMic(true); // hát thì bật mic
         lookToward(STAGES[stage].ry); // quay mặt về phía khán giả
+        startKaraoke(stage); // màn hình nhắc lời trước mặt
+        voice.startSinging(); // mic hát: có echo, reverb... (khác mic voice thường)
       } else if (previous !== null) {
         // hát xong (hoặc bị đẩy khỏi sân khấu): bước xuống phía trước sân khấu, trả mic về như cũ
         camera.position.x = STAGES[previous].spotX;
         camera.position.z = STAGES[previous].spotZ + 1.8;
         setMic(micBeforeSing);
+        stopKaraoke();
+        voice.stopSinging(); // trả về mic thường
       }
     },
     onStageDenied: () => addChatLine('Sân khấu này đã có người hát.', { system: true }),
@@ -366,6 +419,8 @@ function joinRoom(profile) {
         stageOwners.clear();
         mySeat = null;
         myStage = null;
+        stopKaraoke();
+        voice.stopSinging();
         stunUntil = 0;
         stunRing.hide();
         controls.pointerSpeed = 1;
@@ -464,20 +519,71 @@ function nearestFreeStage() {
   return best;
 }
 
-// Âm lượng nghe người khác nói (0..1). Luật gần xa cho phòng nhỏ (20 x 18 m): trong 2 m nghe rõ nhất,
-// giảm dần theo khoảng cách, tới 20 m vẫn còn lờ mờ (15%) để đứng xa vẫn nhận ra có người nói.
+// Màn hình karaoke: người đang hát có thêm một trình phát YouTube (tắt tiếng) trên màn hình nhắc lời trước mặt,
+// chiếu song song với màn hình to và bám theo cùng thời điểm. Người khác không cần dựng cái này.
+// Hình chỉ hiện trên máy của người hát (web không sao chép hình từ khung video của YouTube được), nên phải
+// dựng một trình phát thứ hai; để đỡ nặng chỉ dựng khi hát, cỡ 640x360 vừa đủ với màn hình nhỏ.
+const KARAOKE_PX = { w: 640, h: 360 };
+let karaoke = null; // { obj, follower, cancelled }
+
+function startKaraoke(stageIndex) {
+  stopKaraoke();
+  const m = STAGES[stageIndex].monitor;
+  const el = document.createElement('div');
+  el.style.cssText = `width:${KARAOKE_PX.w}px;height:${KARAOKE_PX.h}px;background:#050505;`;
+  const host = document.createElement('div');
+  el.appendChild(host);
+  const obj = new CSS3DObject(el);
+  obj.position.set(m.x, m.y, m.z);
+  obj.rotation.order = 'YXZ';
+  obj.rotation.set(-m.tilt, m.yaw, 0); // đúng bằng mặt "lỗ" trong cảnh (cinema.js)
+  obj.scale.setScalar(m.width / KARAOKE_PX.w);
+  cssScene.add(obj);
+
+  const state = { obj, follower: null, cancelled: false };
+  karaoke = state;
+  createYouTubePlayer(host, { width: KARAOKE_PX.w, height: KARAOKE_PX.h }).then((p) => {
+    if (state.cancelled) {
+      p.destroy(); // hát xong/đổi chỗ trước khi trình phát kịp sẵn sàng
+      return;
+    }
+    p.mute(); // tiếng đã có ở màn hình to rồi
+    state.follower = { player: p, loadedVideoId: null, volume: () => 0 };
+    followers.push(state.follower);
+    applyDesired();
+  });
+}
+
+function stopKaraoke() {
+  if (!karaoke) return;
+  karaoke.cancelled = true;
+  if (karaoke.follower) {
+    followers.splice(followers.indexOf(karaoke.follower), 1);
+    try {
+      karaoke.follower.player.destroy();
+    } catch {
+      // đã huỷ rồi thì thôi
+    }
+  }
+  cssScene.remove(karaoke.obj);
+  karaoke = null;
+}
+
+// Âm lượng nghe người khác nói (0..1). Chỉ nghe rõ nhất khi đứng gần nhau (cỡ tầm đánh nhau, 1.8 m);
+// xa hơn thì nhỏ dần rất nhanh, và từ VOICE_FAR trở ra thì không nghe thấy gì.
 const VOICE_MAX = 0.6; // 3/5 âm lượng ban đầu
-const VOICE_NEAR = 2;
-const VOICE_FAR = 20;
-const VOICE_MIN = 0.15; // phần còn lại ở xa nhất
+const VOICE_NEAR = 1.8; // trong khoảng này nghe ở mức tối đa
+const VOICE_FAR = 8; // từ khoảng này trở ra là im
 const STAGE_MIC_VOLUME = 0.75; // mic sân khấu: 3/4 mức tối đa, nghe đều cả phòng
 function voiceVolume(id) {
-  for (const owner of stageOwners.values()) if (owner === id) return STAGE_MIC_VOLUME;
+  // thanh "Âm lượng voice" của người dùng: mặc định (60) cho đúng mức thiết kế, kéo lên thì to hơn (tối đa 1)
+  const scale = volumes.voice / (VOICE_MAX * 100);
+  for (const owner of stageOwners.values()) if (owner === id) return Math.min(1, STAGE_MIC_VOLUME * scale);
   const avatar = avatars.items.get(id);
   if (!avatar) return 0;
   const d = Math.hypot(avatar.group.position.x - camera.position.x, avatar.group.position.z - camera.position.z);
   const t = THREE.MathUtils.clamp((d - VOICE_NEAR) / (VOICE_FAR - VOICE_NEAR), 0, 1);
-  return VOICE_MAX * (VOICE_MIN + (1 - VOICE_MIN) * (1 - t) ** 1.5);
+  return Math.min(1, VOICE_MAX * scale * (1 - t) ** 2); // giảm nhanh ở gần rồi nhỏ dần tới 0
 }
 
 // Bật/tắt mic theo ý muốn (không đảo ngược)

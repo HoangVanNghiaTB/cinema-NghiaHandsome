@@ -31,14 +31,31 @@ const ROWS_START_Z = -1; // hàng đầu bắt đầu từ đây
 const STAGE_WIDTH = 3.3;
 const STAGE_DEPTH = 3;
 const STAGE_HEIGHT = 0.5;
+
+// Màn hình karaoke (nhắc lời) ở mỗi sân khấu: đặt trước mặt người hát, cao ~65% chiều cao người (1.6 m) tính cả chân,
+// quay mặt về phía người hát và ngả ra sau cho mặt hướng thẳng vào mắt họ (không phải ngẩng/cúi quá).
+// Cỡ ~32 inch (0.71 x 0.40 m): đứng cách ~1.1 m thì chiếm khoảng 1/3 chiều ngang tầm nhìn, đủ to để đọc lời.
+const PLAYER_EYE_HEIGHT = 1.6; // khớp EYE_HEIGHT trong main.js
+const MONITOR_WIDTH = 0.71;
+const MONITOR_HEIGHT = 0.4;
+const MONITOR_CENTER_Y = 0.85; // tâm màn hình cao hơn mặt sân khấu; mép trên ~1.05 m = 65% chiều cao người
+const MONITOR_DISTANCE = 0.95; // m, từ chỗ người hát ra phía khán giả
+
 export const STAGES = [-1, 1].map((side) => {
   const x = side * 8.25; // nằm ngoài mép màn hình (màn hình rộng ±6.4)
   const z = ROOM.minZ + 0.1 + STAGE_DEPTH / 2; // sát tường trước
+  const spotZ = z + 0.1;
   return {
     x, z, w: STAGE_WIDTH, d: STAGE_DEPTH, height: STAGE_HEIGHT,
     micX: x, micZ: z + 0.55, // mic ở phía khán giả một chút
-    spotX: x, spotZ: z + 0.1, // chỗ người hát đứng, ngay sau mic
+    spotX: x, spotZ, // chỗ người hát đứng, ngay sau mic
     ry: Math.PI,
+    monitor: {
+      x, y: STAGE_HEIGHT + MONITOR_CENTER_Y, z: spotZ + MONITOR_DISTANCE,
+      width: MONITOR_WIDTH, height: MONITOR_HEIGHT,
+      yaw: Math.PI, // mặt màn hình quay về phía người hát (-z)
+      tilt: Math.atan2(PLAYER_EYE_HEIGHT - MONITOR_CENTER_Y, MONITOR_DISTANCE), // góc ngả ra sau để hướng vào mắt (~38°)
+    },
   };
 });
 
@@ -176,6 +193,7 @@ export function buildCinema(scene, { lowQuality = false } = {}) {
   const coneMat = new THREE.MeshLambertMaterial({ color: 0x55555e });
   const micMat = new THREE.MeshLambertMaterial({ color: 0x222228 });
   const micHeadMat = new THREE.MeshLambertMaterial({ color: 0xb0b4bc });
+  const monitorHoleMat = new THREE.MeshBasicMaterial({ color: 0x000000, opacity: 0, blending: THREE.NoBlending });
   const speakerGeo = new THREE.BoxGeometry(0.6, 1.1, 0.5);
   const wooferGeo = new THREE.CylinderGeometry(0.2, 0.2, 0.03, 20).rotateX(Math.PI / 2); // trục hướng về +z (phía khán giả)
   const tweeterGeo = new THREE.CylinderGeometry(0.07, 0.07, 0.03, 16).rotateX(Math.PI / 2);
@@ -206,6 +224,25 @@ export function buildCinema(scene, { lowQuality = false } = {}) {
       addMesh(wooferGeo, coneMat, sx, top + 0.38, sz + 0.265);
       addMesh(tweeterGeo, coneMat, sx, top + 0.85, sz + 0.265);
     }
+
+    // Màn hình karaoke: khung đen + mặt "lỗ" (alpha 0) để hình ở lớp CSS3D hiện xuyên qua, như màn hình to.
+    // Không ai hát thì mặt lỗ chỉ thấy nền đen; chỉ người đang hát mới có hình (xem main.js).
+    // Nhìn từ phía khán giả chỉ thấy mặt lưng đen của khung.
+    const m = s.monitor;
+    const tiltGroup = new THREE.Group();
+    tiltGroup.position.set(m.x, m.y, m.z);
+    tiltGroup.rotation.order = 'YXZ';
+    tiltGroup.rotation.set(-m.tilt, m.yaw, 0); // ngả mặt lên trên về phía người hát
+    const casing = new THREE.Mesh(new THREE.BoxGeometry(m.width + 0.04, m.height + 0.04, 0.04), micMat);
+    casing.position.z = -0.021;
+    const face = new THREE.Mesh(new THREE.PlaneGeometry(m.width, m.height), monitorHoleMat);
+    tiltGroup.add(casing, face);
+    scene.add(tiltGroup);
+
+    // chân đứng: cột và đế tròn, đặt sau lưng màn hình (phía khán giả)
+    const poleLength = MONITOR_CENTER_Y - 0.1;
+    addMesh(new THREE.CylinderGeometry(0.02, 0.02, poleLength, 10), micMat, m.x, top + poleLength / 2, m.z + 0.06);
+    addMesh(new THREE.CylinderGeometry(0.2, 0.22, 0.03, 20), micMat, m.x, top + 0.015, m.z + 0.06);
   }
 
   // Ánh sáng: ít đèn cho nhẹ. Chỉ 2 đèn trần ở cuối phòng (xa màn hình nhất), ánh sáng ấm nhẹ

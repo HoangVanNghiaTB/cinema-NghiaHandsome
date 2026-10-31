@@ -60,6 +60,9 @@ export async function createYouTubePlayer(el, { width = 1280, height = 720, onSt
           resolve({
             load: (videoId, startSeconds = 0) => player.loadVideoById(videoId, startSeconds),
             cue: (videoId, startSeconds = 0) => player.cueVideoById(videoId, startSeconds), // nạp nhưng không phát
+            setVolume: (percent) => player.setVolume(percent), // 0..100, chỉ đổi âm lượng của riêng máy này
+            mute: () => player.mute(),
+            destroy: () => player.destroy(),
             play: () => player.playVideo(),
             pause: () => player.pauseVideo(),
             seek: (seconds) => player.seekTo(seconds, true),

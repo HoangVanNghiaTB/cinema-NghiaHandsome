@@ -22,6 +22,12 @@
       #menu input[type="text"], #login input[type="text"] { width: 380px; max-width: 80vw; font-size: 16px; padding: 10px; }
       #login input[type="color"] { width: 48px; height: 40px; padding: 0; border: 0; background: none; cursor: pointer; }
       #menu small { opacity: 0.6; }
+      #menu .sliders {
+        display: grid; grid-template-columns: auto minmax(120px, 220px) 3.5em; gap: 8px 12px; align-items: center;
+        max-width: 92vw;
+      }
+      #menu .sliders input[type="range"] { width: 100%; touch-action: pan-y; }
+      #menu .sliders span { text-align: right; opacity: 0.8; }
       #hud {
         position: fixed; top: 12px; left: 12px; z-index: 5; pointer-events: none;
         color: #fff; font-size: 14px; background: rgba(0, 0, 0, 0.5); padding: 6px 10px; border-radius: 4px;
@@ -161,6 +167,17 @@
           <option value="low">Thấp (mượt hơn)</option>
           <option value="high">Cao</option>
         </select>
+      </div>
+      <div class="sliders">
+        <label for="vol-video">Âm lượng video</label>
+        <input type="range" id="vol-video" min="0" max="100" value="100" />
+        <span id="vol-video-val">100%</span>
+        <label for="vol-voice">Âm lượng voice</label>
+        <input type="range" id="vol-voice" min="0" max="100" value="60" />
+        <span id="vol-voice-val">60%</span>
+        <label for="vol-effects">Hiệu ứng (bước chân, tát)</label>
+        <input type="range" id="vol-effects" min="0" max="200" value="100" />
+        <span id="vol-effects-val">100%</span>
       </div>
       <div class="row">
         <label><input type="checkbox" id="show-fps" checked /> Hiện FPS</label>

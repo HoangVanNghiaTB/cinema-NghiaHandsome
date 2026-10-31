@@ -102,6 +102,31 @@ qualitySelect.addEventListener('change', () => {
   location.reload();
 });
 
+// Ẩn/hiện dòng FPS ở góc trái trên (nhớ lựa chọn cho lần sau)
+const FPS_KEY = 'cinema-show-fps';
+const fpsEl = $('fps');
+const fpsCheckbox = $('show-fps');
+let showFps = true;
+try {
+  showFps = localStorage.getItem(FPS_KEY) !== 'off';
+} catch {
+  // không đọc được thì để mặc định là hiện
+}
+function applyShowFps() {
+  fpsCheckbox.checked = showFps;
+  fpsEl.style.display = showFps ? '' : 'none';
+}
+applyShowFps();
+fpsCheckbox.addEventListener('change', () => {
+  showFps = fpsCheckbox.checked;
+  applyShowFps();
+  try {
+    localStorage.setItem(FPS_KEY, showFps ? 'on' : 'off');
+  } catch {
+    // không lưu được thì thôi
+  }
+});
+
 createYouTubePlayer(playerHost, {
   width: VIDEO_PX.w,
   height: VIDEO_PX.h,
@@ -655,7 +680,7 @@ function animate() {
   const now = performance.now();
   if (now - fpsStart >= 1000) {
     const fps = Math.round((frames * 1000) / (now - fpsStart));
-    $('fps').textContent = `${fps} FPS · ${renderer.info.render.calls} lệnh vẽ · độ nét ${pixelRatio.toFixed(2)}x${lowQuality ? ' · chế độ nhẹ' : ''}`;
+    if (showFps) fpsEl.textContent = `${fps} FPS · ${renderer.info.render.calls} lệnh vẽ · độ nét ${pixelRatio.toFixed(2)}x${lowQuality ? ' · chế độ nhẹ' : ''}`;
     adaptResolution(fps, now);
     frames = 0;
     fpsStart = now;

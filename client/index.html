@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Rạp chiếu phim 3D</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font-family: sans-serif; }
+      #css-layer, #gl-layer { position: absolute; inset: 0; }
+      #css-layer { pointer-events: none; }
+      #gl-layer canvas { display: block; }
+      #menu, #login {
+        position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; gap: 14px;
+        background: rgba(0, 0, 0, 0.75); color: #fff;
+      }
+      #menu { display: none; }
+      #login { z-index: 20; background: #000; }
+      #menu button, #login button { font-size: 16px; padding: 10px 20px; cursor: pointer; }
+      #menu #enter { font-size: 20px; padding: 12px 28px; }
+      #menu .row, #login .row { display: flex; gap: 8px; align-items: center; }
+      #menu input[type="text"], #login input[type="text"] { width: 380px; max-width: 80vw; font-size: 16px; padding: 10px; }
+      #login input[type="color"] { width: 48px; height: 40px; padding: 0; border: 0; background: none; cursor: pointer; }
+      #menu small { opacity: 0.6; }
+      #hud {
+        position: fixed; top: 12px; left: 12px; z-index: 5; pointer-events: none;
+        color: #fff; font-size: 14px; background: rgba(0, 0, 0, 0.5); padding: 6px 10px; border-radius: 4px;
+      }
+      #msg, #login-msg { color: #ff8a8a; min-height: 1.2em; }
+      #chat {
+        position: fixed; left: 12px; bottom: 12px; z-index: 15; width: 420px; max-width: 80vw;
+        color: #fff; font-size: 14px; pointer-events: none;
+      }
+      #chat-log { max-height: 40vh; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; }
+      #chat .line {
+        background: rgba(0, 0, 0, 0.5); padding: 2px 8px; margin-top: 2px; border-radius: 3px;
+        word-break: break-word; transition: opacity 1s;
+      }
+      #chat .line.system { opacity: 0.7; font-style: italic; }
+      #chat .line.old { opacity: 0; }
+      body.show-chat #chat .line.old { opacity: 1; }
+      #chat-input { display: none; width: 100%; box-sizing: border-box; margin-top: 6px; padding: 8px; font-size: 14px; pointer-events: auto; }
+    </style>
+  </head>
+  <body>
+    <div id="css-layer"></div>
+    <div id="gl-layer"></div>
+
+    <form id="login">
+      <h2>Rạp chiếu phim 3D</h2>
+      <input id="name" type="text" maxlength="20" placeholder="Tên của bạn" autocomplete="off" required />
+      <div class="row"><label for="color">Màu avatar</label><input id="color" type="color" /></div>
+      <button type="submit">Vào phòng</button>
+      <div id="login-msg"></div>
+    </form>
+
+    <div id="hud">
+      <div id="net">○ Chưa vào phòng</div>
+      <div id="voice-status">Voice: chưa bật</div>
+    </div>
+
+    <div id="chat">
+      <div id="chat-log"></div>
+      <input id="chat-input" type="text" maxlength="200" placeholder="Nhập tin nhắn, Enter để gửi, Esc để huỷ" autocomplete="off" />
+    </div>
+
+    <div id="menu">
+      <button id="enter">Vào rạp</button>
+      <button id="mic">Bật/tắt mic</button>
+      <div class="row">
+        <input id="url" type="text" placeholder="Dán link YouTube..." />
+        <button id="load">Chiếu</button>
+      </div>
+      <div class="row">
+        <button id="play">Phát</button>
+        <button id="pause">Tạm dừng</button>
+        <button id="back">-10s</button>
+        <button id="forward">+10s</button>
+      </div>
+      <div id="msg"></div>
+      <small>WASD để đi, chuột để nhìn, M để bật/tắt mic, Enter để chat, Esc để mở menu này</small>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

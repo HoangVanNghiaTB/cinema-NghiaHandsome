@@ -1,0 +1,12 @@
+{
+  "name": "cinema-3d",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "build": "npm --prefix client install && npm --prefix client run build && npm --prefix server install",
+    "start": "node server/index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

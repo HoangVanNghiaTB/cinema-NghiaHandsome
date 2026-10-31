@@ -1,0 +1,190 @@
+// Voice chat mesh bằng WebRTC thuần; báo hiệu (signaling) đi qua Socket.IO.
+//
+// Quy trình: ai bật voice thì gửi 'hello' cho mọi người trong phòng. Khi hai bên đều đã bật,
+// bên có id nhỏ hơn tạo offer (tránh hai bên cùng offer một lúc).
+
+// Danh sách STUN/TURN do server gửi trong 'init' (setRoster); đây là giá trị dự phòng
+let rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+const SPEAK_THRESHOLD = 0.03; // RMS (0..1) coi là đang nói
+const SPEAK_HOLD_MS = 300;
+
+// sendSignal(toId, data); onSpeaking(id, isSpeaking)
+export function createVoice({ sendSignal, onSpeaking }) {
+  let selfId = null;
+  let started = false;
+  let starting = null;
+  let localStream = null;
+  let audioCtx = null;
+  const roster = new Set(); // id những người khác trong phòng
+  const readyPeers = new Set(); // đã nhận 'hello' từ họ
+  const helloSentTo = new Set();
+  const peers = new Map(); // id -> { pc, audio, analyser, speaking, lastLoud }
+  const chains = new Map(); // id -> Promise: xử lý tín hiệu tuần tự theo từng người
+
+  function sendHello(id) {
+    if (helloSentTo.has(id)) return;
+    helloSentTo.add(id);
+    sendSignal(id, { type: 'hello' });
+  }
+
+  function connectIfReady(id) {
+    if (!started || !roster.has(id) || !readyPeers.has(id) || peers.has(id)) return;
+    if (selfId < id) createPeer(id, true);
+  }
+
+  function createPeer(id, initiator) {
+    const pc = new RTCPeerConnection(rtcConfig);
+    const peer = { pc, audio: null, analyser: null, speaking: false, lastLoud: 0 };
+    peers.set(id, peer);
+
+    if (localStream) localStream.getTracks().forEach((t) => pc.addTrack(t, localStream));
+    else if (initiator) pc.addTransceiver('audio', { direction: 'recvonly' }); // không có mic: chỉ nghe
+
+    pc.onicecandidate = (e) => e.candidate && sendSignal(id, { type: 'candidate', candidate: e.candidate });
+    pc.ontrack = (e) => attachRemote(id, peer, e.streams[0]);
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === 'failed' && peers.get(id) === peer) closePeer(id);
+    };
+
+    if (initiator) {
+      pc.createOffer()
+        .then((offer) => pc.setLocalDescription(offer))
+        .then(() => sendSignal(id, { type: 'offer', sdp: pc.localDescription }))
+        .catch((err) => console.warn('Voice: lỗi tạo offer', err));
+    }
+    return peer;
+  }
+
+  function attachRemote(id, peer, stream) {
+    if (!stream || peer.audio) return;
+    const audio = document.createElement('audio');
+    audio.autoplay = true;
+    audio.srcObject = stream;
+    document.body.appendChild(audio);
+    peer.audio = audio;
+    if (audioCtx) {
+      peer.analyser = audioCtx.createAnalyser();
+      peer.analyser.fftSize = 256;
+      audioCtx.createMediaStreamSource(stream).connect(peer.analyser);
+    }
+  }
+
+  function closePeer(id) {
+    const peer = peers.get(id);
+    if (!peer) return;
+    peer.pc.close();
+    peer.audio?.remove();
+    peers.delete(id);
+    if (peer.speaking) onSpeaking?.(id, false);
+  }
+
+  function reset() {
+    for (const id of [...peers.keys()]) closePeer(id);
+    roster.clear();
+    readyPeers.clear();
+    helloSentTo.clear();
+    chains.clear();
+  }
+
+  // Phát hiện ai đang nói: so mức âm lượng (RMS) của từng luồng
+  const buf = new Uint8Array(128);
+  setInterval(() => {
+    const now = performance.now();
+    for (const [id, peer] of peers) {
+      if (!peer.analyser) continue;
+      peer.analyser.getByteTimeDomainData(buf);
+      let sum = 0;
+      for (const v of buf) sum += ((v - 128) / 128) ** 2;
+      if (Math.sqrt(sum / buf.length) > SPEAK_THRESHOLD) peer.lastLoud = now;
+      const speaking = now - peer.lastLoud < SPEAK_HOLD_MS;
+      if (speaking !== peer.speaking) {
+        peer.speaking = speaking;
+        onSpeaking?.(id, speaking);
+      }
+    }
+  }, 100);
+
+  return {
+    // Gọi khi vào phòng / kết nối lại: danh sách người khác trong phòng
+    setRoster(selfIdValue, ids, iceServers) {
+      reset();
+      selfId = selfIdValue;
+      if (iceServers?.length) rtcConfig = { iceServers };
+      ids.forEach((id) => roster.add(id));
+      if (started) ids.forEach(sendHello);
+    },
+    peerJoined(id) {
+      roster.add(id);
+    },
+    peerLeft(id) {
+      roster.delete(id);
+      readyPeers.delete(id);
+      helloSentTo.delete(id);
+      chains.delete(id);
+      closePeer(id);
+    },
+    reset,
+
+    // Xin quyền mic và bật voice. Trả về 'mic' | 'listen-only'. Gọi lần nữa thì trả cùng kết quả.
+    start() {
+      if (starting) return starting;
+      starting = (async () => {
+        audioCtx = new AudioContext();
+        let mode = 'mic';
+        try {
+          localStream = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+          });
+          localStream.getAudioTracks().forEach((t) => (t.enabled = false)); // mặc định tắt tiếng
+        } catch (err) {
+          console.warn('Voice: không dùng được mic, chuyển sang chỉ nghe', err);
+          mode = 'listen-only';
+        }
+        started = true;
+        roster.forEach(sendHello);
+        roster.forEach(connectIfReady);
+        return mode;
+      })();
+      return starting;
+    },
+
+    // Bật/tắt mic; trả về true nếu đang bật. Không có mic thì trả về false.
+    toggleMic() {
+      const tracks = localStream?.getAudioTracks() ?? [];
+      if (!tracks.length) return false;
+      const enabled = !tracks[0].enabled;
+      tracks.forEach((t) => (t.enabled = enabled));
+      return enabled;
+    },
+
+    handleSignal(from, data) {
+      if (!data || !roster.has(from)) return;
+
+      if (data.type === 'hello') {
+        readyPeers.add(from);
+        if (started) {
+          sendHello(from);
+          connectIfReady(from);
+        }
+        return;
+      }
+      if (!started) return;
+
+      const chain = (chains.get(from) ?? Promise.resolve())
+        .then(async () => {
+          if (data.type === 'offer') {
+            const peer = peers.get(from) ?? createPeer(from, false);
+            await peer.pc.setRemoteDescription(data.sdp);
+            await peer.pc.setLocalDescription(await peer.pc.createAnswer());
+            sendSignal(from, { type: 'answer', sdp: peer.pc.localDescription });
+          } else if (data.type === 'answer') {
+            await peers.get(from)?.pc.setRemoteDescription(data.sdp);
+          } else if (data.type === 'candidate') {
+            await peers.get(from)?.pc.addIceCandidate(data.candidate);
+          }
+        })
+        .catch((err) => console.warn('Voice: lỗi xử lý tín hiệu', err));
+      chains.set(from, chain);
+    },
+  };
+}

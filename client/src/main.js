@@ -3,6 +3,8 @@ import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockCont
 import { CSS3DRenderer, CSS3DObject } from 'three/examples/jsm/renderers/CSS3DRenderer.js';
 import { buildCinema, floorHeight, ROOM, SCREEN, SEATS } from './scene/cinema.js';
 import { createTouchControls } from './ui/touch.js';
+import { StunRing } from './scene/stunRing.js';
+import { createFootsteps, STEP_LENGTH } from './audio/footsteps.js';
 import { createYouTubePlayer, parseVideoId } from './player/youtube.js';
 import { Avatars } from './scene/avatars.js';
 import { connectToRoom } from './net/socket.js';
@@ -17,6 +19,8 @@ if (isTouch) document.body.classList.add('touch');
 const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 100);
 camera.position.set(0, 1.6, -4);
 camera.rotation.order = 'YXZ'; // rotation.y là góc quay ngang thật sự, kể cả khi ngước/cúi
+scene.add(camera); // để các vật gắn vào camera (vòng sao choáng) được vẽ
+const footsteps = createFootsteps(camera); // tiếng bước chân; camera là "tai" người nghe
 
 // Chất lượng đồ hoạ: 'auto' (mặc định) | 'low' | 'high'. Tự động chọn thấp nếu trình duyệt chỉ có đồ hoạ phần mềm
 // (không có tăng tốc card đồ hoạ), để người dùng không phải sửa máy mới xem được mượt.
@@ -161,7 +165,7 @@ $('pause').addEventListener('click', () => room.pauseVideo(currentTime()));
 $('back').addEventListener('click', () => room.seekVideo(Math.max(0, currentTime() - 10)));
 $('forward').addEventListener('click', () => room.seekVideo(currentTime() + 10));
 
-const avatars = new Avatars(scene);
+const avatars = new Avatars(scene, { onStep: (x, z) => footsteps.playAt(x, z) });
 let myId = null;
 const names = new Map(); // id -> tên, để báo ai vào/rời phòng
 
@@ -313,7 +317,7 @@ function joinRoom(profile) {
         seatOwners.clear();
         mySeat = null;
         stunUntil = 0;
-        stunOverlay.classList.remove('show');
+        stunRing.hide();
         controls.pointerSpeed = 1;
         voice.reset();
         setNetStatus('○ Mất kết nối, đang thử lại...');
@@ -426,18 +430,18 @@ function updateSitPrompt() {
 const PUNCH_COOLDOWN_MS = 1000; // khớp server, chỉ để đỡ gửi thừa
 let stunUntil = 0;
 let lastPunchAt = 0;
-const stunOverlay = $('stun-stars');
+const stunRing = new StunRing(camera); // vòng sao 3D gắn vào camera, chỉ hiện khi mình bị choáng
 const stunTimers = new Map(); // id người khác -> hẹn giờ hết choáng
 const isStunned = () => performance.now() < stunUntil;
 
 function startStun(id, duration) {
   if (id === myId) {
     stunUntil = performance.now() + duration;
-    stunOverlay.classList.add('show'); // sao quay giữa màn hình
+    stunRing.show();
     controls.pointerSpeed = 0; // chuột không xoay được nữa
     setTimeout(() => {
       if (isStunned()) return;
-      stunOverlay.classList.remove('show');
+      stunRing.hide();
       controls.pointerSpeed = 1;
     }, duration + 20);
     return;
@@ -451,22 +455,6 @@ function startStun(id, duration) {
       stunTimers.delete(id);
     }, duration)
   );
-}
-
-// Sao quay quanh "đầu" trên màn hình người bị choáng: quỹ đạo elip dẹt; sao ở nửa dưới (gần mình) to và rõ hơn,
-// sao ở nửa trên (phía sau) nhỏ và mờ hơn, tạo cảm giác quay có chiều sâu
-const stunStars = [...stunOverlay.querySelectorAll('.star')];
-const STAR_ORBIT_PERIOD = 1.1; // giây mỗi vòng
-function updateStunStars(nowMs) {
-  const rx = Math.min(170, innerWidth * 0.25);
-  const ry = rx * 0.3;
-  const base = (nowMs / 1000) * ((Math.PI * 2) / STAR_ORBIT_PERIOD);
-  stunStars.forEach((el, i) => {
-    const a = base + (i * Math.PI * 2) / stunStars.length;
-    const front = (Math.sin(a) + 1) / 2; // 0 = phía sau, 1 = phía trước
-    el.style.transform = `translate(${Math.cos(a) * rx}px, ${Math.sin(a) * ry}px) scale(${0.65 + 0.55 * front})`;
-    el.style.opacity = 0.55 + 0.45 * front;
-  });
 }
 
 // Rung nhẹ khi bị choáng: nghiêng camera một góc rất nhỏ quanh lúc vẽ rồi trả lại (không đổi hướng nhìn thật)
@@ -541,6 +529,7 @@ function setActive(active) {
 }
 
 $('enter').addEventListener('click', () => {
+  footsteps.unlock(); // trình duyệt chỉ cho phát âm thanh sau một thao tác bấm
   if (isTouch) {
     setActive(true);
     // Toàn màn hình cho rộng chỗ, rồi khoá ngang (Android Chrome cho khoá khi đang toàn màn hình; iPhone thì không,
@@ -581,6 +570,7 @@ const EYE_HEIGHT = 1.6;
 const clock = new THREE.Clock();
 const SEND_INTERVAL = 1 / 15;
 let sendTimer = 0;
+let ownStepDist = 0;
 let frames = 0;
 let fpsStart = performance.now();
 
@@ -602,6 +592,8 @@ function animate() {
 
   const p = camera.position;
   const seat = mySeat !== null ? SEATS[mySeat] : null;
+  const stepFromX = p.x;
+  const stepFromZ = p.z;
 
   if (isActive() && !isStunned()) {
     const forward = THREE.MathUtils.clamp(
@@ -629,6 +621,18 @@ function animate() {
     targetY = floorHeight(p.z) + EYE_HEIGHT;
   }
   p.y += (targetY - p.y) * Math.min(1, dt * 12);
+
+  // Tiếng bước chân của chính mình: đi đủ một bước thì phát (ngồi/choáng thì không có)
+  const walked = Math.hypot(p.x - stepFromX, p.z - stepFromZ);
+  if (seat || isStunned() || walked > 1.5) {
+    ownStepDist = 0;
+  } else {
+    ownStepDist += walked;
+    if (ownStepDist >= STEP_LENGTH) {
+      ownStepDist -= STEP_LENGTH;
+      footsteps.playAt(p.x, p.z);
+    }
+  }
   updateSitPrompt();
 
   // Gửi vị trí ~15 lần/giây, chỉ khi có thay đổi (y là độ cao chân)
@@ -657,7 +661,7 @@ function animate() {
   const shaking = isStunned();
   if (shaking) {
     applyShake(now);
-    updateStunStars(now);
+    stunRing.update(now);
   }
   renderer.render(scene, camera);
   if (!NO_CSS) cssRenderer.render(cssScene, camera);

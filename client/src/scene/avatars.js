@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { STEP_LENGTH } from '../audio/footsteps.js';
 
 const BODY_LENGTH = 1.0;
 const BODY_RADIUS = 0.3;
@@ -24,26 +25,38 @@ function makeNameSprite(name) {
   return sprite;
 }
 
-// Vẽ một ngôi sao 5 cánh lên canvas, dùng chung cho mọi ngôi sao choáng (tạo một lần)
-let starMaterial = null;
-function getStarMaterial() {
-  if (starMaterial) return starMaterial;
+// Vẽ một ngôi sao 5 cánh có quầng sáng lên canvas, dùng chung cho mọi ngôi sao choáng (tạo một lần)
+let starTexture = null;
+export function getStarTexture() {
+  if (starTexture) return starTexture;
   const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = 64;
+  canvas.width = canvas.height = 128;
   const ctx = canvas.getContext('2d');
+  const glow = ctx.createRadialGradient(64, 64, 10, 64, 64, 64);
+  glow.addColorStop(0, 'rgba(255, 210, 60, 0.55)');
+  glow.addColorStop(1, 'rgba(255, 210, 60, 0)');
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, 128, 128);
   ctx.beginPath();
   for (let i = 0; i < 10; i++) {
-    const r = i % 2 === 0 ? 28 : 12;
+    const r = i % 2 === 0 ? 50 : 22;
     const a = -Math.PI / 2 + (i * Math.PI) / 5;
-    ctx.lineTo(32 + r * Math.cos(a), 32 + r * Math.sin(a));
+    ctx.lineTo(64 + r * Math.cos(a), 64 + r * Math.sin(a));
   }
   ctx.closePath();
   ctx.fillStyle = '#ffd400';
   ctx.fill();
   ctx.strokeStyle = '#ff9a00';
-  ctx.lineWidth = 3;
+  ctx.lineWidth = 5;
+  ctx.lineJoin = 'round';
   ctx.stroke();
-  starMaterial = new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas), depthWrite: false });
+  starTexture = new THREE.CanvasTexture(canvas);
+  return starTexture;
+}
+
+let starMaterial = null;
+function getStarMaterial() {
+  if (!starMaterial) starMaterial = new THREE.SpriteMaterial({ map: getStarTexture(), depthWrite: false });
   return starMaterial;
 }
 
@@ -53,8 +66,10 @@ const STAR_SPIN = 4; // rad/giây
 
 // Avatar tối giản: viên nhộng màu + khối nhỏ chỉ hướng nhìn + nhãn tên
 export class Avatars {
-  constructor(scene) {
+  // onStep(x, z): gọi mỗi khi một avatar đi đủ một bước (để phát tiếng bước chân)
+  constructor(scene, { onStep } = {}) {
     this.scene = scene;
+    this.onStep = onStep;
     this.items = new Map(); // id -> { group, target: {x,y,z,ry} }
   }
 
@@ -81,7 +96,10 @@ export class Avatars {
     group.position.set(x, y, z);
     group.rotation.y = ry;
     this.scene.add(group);
-    this.items.set(id, { group, body, visor, sprite, target: { x, y, z, ry } });
+    this.items.set(id, {
+      group, body, visor, sprite, target: { x, y, z, ry },
+      seated: false, lastX: x, lastZ: z, stepDist: 0, // theo dõi quãng đường để biết khi nào có một bước
+    });
     if (seat !== null) this.setSeated(id, true);
   }
 
@@ -114,6 +132,7 @@ export class Avatars {
   setSeated(id, seated) {
     const item = this.items.get(id);
     if (!item) return;
+    item.seated = seated;
     const s = seated ? SEATED_SCALE : 1;
     item.body.scale.y = s;
     item.body.position.y = (BODY_HEIGHT * s) / 2;
@@ -152,7 +171,8 @@ export class Avatars {
   // Nội suy vị trí/hướng để chuyển động mượt dù chỉ nhận ~15 lần/giây
   update(dt) {
     const k = Math.min(1, dt * SMOOTHING);
-    for (const { group, target, stars } of this.items.values()) {
+    for (const item of this.items.values()) {
+      const { group, target, stars } = item;
       if (stars) stars.rotation.y += dt * STAR_SPIN;
       group.position.x += (target.x - group.position.x) * k;
       group.position.y += (target.y - group.position.y) * k;
@@ -160,6 +180,21 @@ export class Avatars {
       let dr = target.ry - group.rotation.y;
       dr = Math.atan2(Math.sin(dr), Math.cos(dr)); // đi đường ngắn nhất
       group.rotation.y += dr * k;
+
+      // Đi đủ một bước (đo theo quãng đường thực tế trên mặt sàn) thì báo để phát tiếng bước chân.
+      // Ngồi thì không có tiếng; nhảy cóc xa (đứng dậy, kết nối lại) thì không tính.
+      const moved = Math.hypot(group.position.x - item.lastX, group.position.z - item.lastZ);
+      item.lastX = group.position.x;
+      item.lastZ = group.position.z;
+      if (item.seated || moved > 1.5) {
+        item.stepDist = 0;
+      } else {
+        item.stepDist += moved;
+        if (item.stepDist >= STEP_LENGTH) {
+          item.stepDist -= STEP_LENGTH;
+          this.onStep?.(group.position.x, group.position.z);
+        }
+      }
     }
   }
 }

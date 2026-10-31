@@ -91,6 +91,7 @@ export function createVocalChain(ctx, track) {
   mix.connect(limiter).connect(out);
 
   return {
+    output: limiter, // đầu ra dạng nút Web Audio, để nối thêm bộ chỉnh âm lượng riêng cho từng người nghe
     outStream: out.stream,
     outTrack: out.stream.getAudioTracks()[0],
     dispose() {

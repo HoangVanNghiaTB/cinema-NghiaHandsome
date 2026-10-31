@@ -40,21 +40,31 @@ const MONITOR_WIDTH = 0.71;
 const MONITOR_HEIGHT = 0.4;
 const MONITOR_CENTER_Y = 0.85; // tâm màn hình cao hơn mặt sân khấu; mép trên ~1.05 m = 65% chiều cao người
 const MONITOR_DISTANCE = 0.95; // m, từ chỗ người hát ra phía khán giả
+// Màn hình đặt lệch sang bên (về phía giữa phòng) để cột mic, nằm thẳng giữa mắt người hát và màn hình, không che.
+// Lệch 0.55 m thì cột mic cách mép trong màn hình gần 5 cm theo đường nhìn (kiểm tra bằng tính toán hình học).
+const MONITOR_SIDE_OFFSET = 0.55;
 
 export const STAGES = [-1, 1].map((side) => {
   const x = side * 8.25; // nằm ngoài mép màn hình (màn hình rộng ±6.4)
   const z = ROOM.minZ + 0.1 + STAGE_DEPTH / 2; // sát tường trước
   const spotZ = z + 0.1;
+
+  // Màn hình quay thẳng vào mắt người hát: pháp tuyến mặt màn hình hướng từ tâm màn hình tới mắt
+  const mx = x - side * MONITOR_SIDE_OFFSET; // sân khấu trái (side -1) lệch sang phải, sân khấu phải lệch sang trái
+  const my = STAGE_HEIGHT + MONITOR_CENTER_Y;
+  const mz = spotZ + MONITOR_DISTANCE;
+  const toEye = new THREE.Vector3(x - mx, STAGE_HEIGHT + PLAYER_EYE_HEIGHT - my, spotZ - mz).normalize();
+
   return {
     x, z, w: STAGE_WIDTH, d: STAGE_DEPTH, height: STAGE_HEIGHT,
     micX: x, micZ: z + 0.55, // mic ở phía khán giả một chút
     spotX: x, spotZ, // chỗ người hát đứng, ngay sau mic
     ry: Math.PI,
     monitor: {
-      x, y: STAGE_HEIGHT + MONITOR_CENTER_Y, z: spotZ + MONITOR_DISTANCE,
+      x: mx, y: my, z: mz,
       width: MONITOR_WIDTH, height: MONITOR_HEIGHT,
-      yaw: Math.PI, // mặt màn hình quay về phía người hát (-z)
-      tilt: Math.atan2(PLAYER_EYE_HEIGHT - MONITOR_CENTER_Y, MONITOR_DISTANCE), // góc ngả ra sau để hướng vào mắt (~38°)
+      yaw: Math.atan2(toEye.x, toEye.z), // quay ngang cho mặt màn hình hướng vào người hát
+      tilt: Math.asin(toEye.y), // ngả ra sau cho mặt hướng lên đúng tầm mắt (~38°)
     },
   };
 });
@@ -218,7 +228,7 @@ export function buildCinema(scene, { lowQuality = false } = {}) {
 
     // 2 loa ở 2 góc phía khán giả: thùng loa, loa trầm (to) và loa treble (nhỏ) hướng ra phòng
     for (const side of [-1, 1]) {
-      const sx = s.x + side * (s.w / 2 - 0.4);
+      const sx = s.x + side * (s.w / 2 - 0.3); // sát mép hơn một chút để chừa chỗ cho màn hình karaoke
       const sz = s.z + s.d / 2 - 0.35;
       addMesh(speakerGeo, speakerMat, sx, top + 0.55, sz);
       addMesh(wooferGeo, coneMat, sx, top + 0.38, sz + 0.265);

@@ -92,10 +92,12 @@ let player = null;
 
 // Thanh âm lượng trong menu, nhớ cho lần sau. Mỗi thanh chỉ chỉnh âm lượng trên máy của chính mình.
 //   video: âm lượng trình phát YouTube (0-100)
-//   voice: âm lượng tối đa nghe người khác nói (0-100); mặc định 60 = mức thiết kế ban đầu (VOICE_MAX)
+//   voice: nghe người khác nói to bao nhiêu % so với mức thiết kế (0-100; 100 = đúng mức thiết kế, VOICE_MAX).
+//          Không tăng thêm được vì giọng đã được người nói đưa về mức thiết kế, trình duyệt không cho phát to hơn.
 //   effects: hiệu ứng bước chân, tát (% so với thiết kế, 0-200)
-const VOLUMES_KEY = 'cinema-volumes';
-const VOLUME_DEFAULTS = { video: 100, voice: 60, effects: 100 };
+// Khoá lưu đổi sang v2 vì thanh voice trước đây có nghĩa khác (mặc định 60), tránh dùng nhầm giá trị cũ.
+const VOLUMES_KEY = 'cinema-volumes-v2';
+const VOLUME_DEFAULTS = { video: 100, voice: 100, effects: 100 };
 const VOLUME_MAX = { video: 100, voice: 100, effects: 200 };
 const volumes = { ...VOLUME_DEFAULTS };
 try {
@@ -261,7 +263,9 @@ function updateHud() {
 const voice = createVoice({
   sendSignal: (to, data) => room.sendSignal(to, data),
   onSpeaking: (id, speaking) => avatars.setSpeaking(id, speaking),
-  getVolume: (id) => voiceVolume(id), // gần/xa; người đang hát thì nghe cả phòng
+  getVolume: (id, senderMode) => listenVoiceVolume(id, senderMode),
+  getSendVolume: (id) => sendVoiceVolume(id), // người nói tự hạ âm lượng gần/xa cho từng người nghe
+  getExpectedGain: (id) => expectedVoiceGain(id),
 });
 function toggleMic() {
   if (voiceMode !== 'mic') return;
@@ -575,21 +579,35 @@ function stopKaraoke() {
   karaoke = null;
 }
 
-// Âm lượng nghe người khác nói (0..1). Chỉ nghe rõ nhất khi đứng gần nhau (cỡ tầm đánh nhau, 1.8 m);
-// xa hơn thì nhỏ dần rất nhanh, và từ VOICE_FAR trở ra thì không nghe thấy gì.
+// Âm lượng giọng theo luật gần xa. Chỉ nghe rõ nhất khi đứng gần nhau (cỡ tầm đánh nhau, 1.8 m);
+// xa hơn thì nhỏ dần rất nhanh, và từ VOICE_FAR trở ra thì không nghe thấy gì. Người đang hát thì cả phòng nghe đều.
 const VOICE_MAX = 0.6; // 3/5 âm lượng ban đầu
 const VOICE_NEAR = 1.8; // trong khoảng này nghe ở mức tối đa
 const VOICE_FAR = 8; // từ khoảng này trở ra là im
 const STAGE_MIC_VOLUME = 0.75; // mic sân khấu: 3/4 mức tối đa, nghe đều cả phòng
-function voiceVolume(id) {
-  // thanh "Âm lượng voice" của người dùng: mặc định (60) cho đúng mức thiết kế, kéo lên thì to hơn (tối đa 1)
-  const scale = volumes.voice / (VOICE_MAX * 100);
-  for (const owner of stageOwners.values()) if (owner === id) return Math.min(1, STAGE_MIC_VOLUME * scale);
-  const avatar = avatars.items.get(id);
-  if (!avatar) return 0;
-  const d = Math.hypot(avatar.group.position.x - camera.position.x, avatar.group.position.z - camera.position.z);
+
+// Âm lượng theo luật trên, giữa người nói (đang hát hay không) và người nghe cách nhau d mét
+function designVolume(singer, d) {
+  if (singer) return STAGE_MIC_VOLUME;
   const t = THREE.MathUtils.clamp((d - VOICE_NEAR) / (VOICE_FAR - VOICE_NEAR), 0, 1);
-  return Math.min(1, VOICE_MAX * scale * (1 - t) ** 2); // giảm nhanh ở gần rồi nhỏ dần tới 0
+  return VOICE_MAX * (1 - t) ** 2; // giảm nhanh ở gần rồi nhỏ dần tới 0
+}
+const isSinger = (id) => [...stageOwners.values()].includes(id);
+function distanceTo(id) {
+  const avatar = avatars.items.get(id);
+  if (!avatar) return Infinity;
+  return Math.hypot(avatar.group.position.x - camera.position.x, avatar.group.position.z - camera.position.z);
+}
+// Âm lượng người `id` gửi cho mình (người nói tự hạ trước khi gửi), dùng để đo "đang nói" cho đúng
+const expectedVoiceGain = (id) => designVolume(isSinger(id), distanceTo(id));
+// Âm lượng mình gửi cho người `id`: gần/xa theo khoảng cách tới họ, hoặc 3/4 nếu mình đang hát
+const sendVoiceVolume = (id) => designVolume(myStage !== null, distanceTo(id));
+// Hệ số mình tự áp dụng khi phát giọng người `id` (thanh "Âm lượng voice" trong menu, 0-100% so với mức thiết kế).
+// Nếu thiết bị người đó đã hạ âm lượng rồi ('gain') thì chỉ cần hệ số của mình; nếu họ gửi giọng gốc ('raw')
+// thì mình phải tự hạ theo khoảng cách như cách cũ.
+function listenVoiceVolume(id, senderMode) {
+  const own = volumes.voice / 100;
+  return senderMode === 'gain' ? own : Math.min(1, own * expectedVoiceGain(id));
 }
 
 // Bật/tắt mic theo ý muốn (không đảo ngược)

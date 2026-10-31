@@ -94,14 +94,13 @@
         #rotate-overlay { display: flex; }
       }
       /* Sao quay giữa màn hình khi bị choáng (CSS thuần, rất nhẹ) */
-      #stun-stars { display: none; position: fixed; left: 50%; top: 45%; width: 0; height: 0; z-index: 7; pointer-events: none; }
+      /* Vị trí từng sao được main.js tính mỗi khung hình (quỹ đạo elip như sao quay quanh đầu) */
+      #stun-stars { display: none; position: fixed; left: 50%; top: 40%; width: 0; height: 0; z-index: 7; pointer-events: none; }
       #stun-stars.show { display: block; }
-      #stun-stars .ring { position: absolute; left: -110px; top: -110px; width: 220px; height: 220px; animation: stun-spin 1.1s linear infinite; }
       #stun-stars .star {
-        position: absolute; left: 50%; top: 50%; margin: -22px 0 0 -22px; font-size: 44px; line-height: 44px;
-        color: #ffd400; text-shadow: 0 0 6px #ff9a00;
+        position: absolute; left: 0; top: 0; margin: -36px 0 0 -36px; font-size: 72px; line-height: 72px; width: 72px; text-align: center;
+        color: #ffd400; text-shadow: 0 0 8px #ff9a00, 0 0 2px #b36b00; will-change: transform;
       }
-      @keyframes stun-spin { to { transform: rotate(360deg); } }
       #btn-punch { background: rgba(170, 30, 30, 0.8); }
       #chat-input { display: none; width: 100%; box-sizing: border-box; margin-top: 6px; padding: 8px; font-size: 14px; pointer-events: auto; }
     </style>
@@ -136,13 +135,11 @@
     </div>
 
     <div id="stun-stars">
-      <div class="ring">
-        <span class="star" style="transform: rotate(0deg) translateY(-90px)">&#9733;</span>
-        <span class="star" style="transform: rotate(72deg) translateY(-90px)">&#9733;</span>
-        <span class="star" style="transform: rotate(144deg) translateY(-90px)">&#9733;</span>
-        <span class="star" style="transform: rotate(216deg) translateY(-90px)">&#9733;</span>
-        <span class="star" style="transform: rotate(288deg) translateY(-90px)">&#9733;</span>
-      </div>
+      <span class="star">&#9733;</span>
+      <span class="star">&#9733;</span>
+      <span class="star">&#9733;</span>
+      <span class="star">&#9733;</span>
+      <span class="star">&#9733;</span>
     </div>
 
     <div id="sit-prompt"></div>

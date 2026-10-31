@@ -453,6 +453,37 @@ function startStun(id, duration) {
   );
 }
 
+// Sao quay quanh "đầu" trên màn hình người bị choáng: quỹ đạo elip dẹt; sao ở nửa dưới (gần mình) to và rõ hơn,
+// sao ở nửa trên (phía sau) nhỏ và mờ hơn, tạo cảm giác quay có chiều sâu
+const stunStars = [...stunOverlay.querySelectorAll('.star')];
+const STAR_ORBIT_PERIOD = 1.1; // giây mỗi vòng
+function updateStunStars(nowMs) {
+  const rx = Math.min(170, innerWidth * 0.25);
+  const ry = rx * 0.3;
+  const base = (nowMs / 1000) * ((Math.PI * 2) / STAR_ORBIT_PERIOD);
+  stunStars.forEach((el, i) => {
+    const a = base + (i * Math.PI * 2) / stunStars.length;
+    const front = (Math.sin(a) + 1) / 2; // 0 = phía sau, 1 = phía trước
+    el.style.transform = `translate(${Math.cos(a) * rx}px, ${Math.sin(a) * ry}px) scale(${0.65 + 0.55 * front})`;
+    el.style.opacity = 0.55 + 0.45 * front;
+  });
+}
+
+// Rung nhẹ khi bị choáng: nghiêng camera một góc rất nhỏ quanh lúc vẽ rồi trả lại (không đổi hướng nhìn thật)
+const SHAKE_AMPLITUDE = 0.012; // rad (~0.7°)
+const SHAKE_FADE_MS = 400;
+const shakeEuler = new THREE.Euler();
+const shakeQuat = new THREE.Quaternion();
+const savedQuat = new THREE.Quaternion();
+function applyShake(nowMs) {
+  const t = nowMs / 1000;
+  const fade = Math.min(1, (stunUntil - nowMs) / SHAKE_FADE_MS); // yếu dần ở cuối
+  const a = SHAKE_AMPLITUDE * fade;
+  savedQuat.copy(camera.quaternion);
+  shakeEuler.set(a * Math.sin(t * 37), a * Math.sin(t * 29 + 1), a * 0.7 * Math.sin(t * 23 + 2));
+  camera.quaternion.multiply(shakeQuat.setFromEuler(shakeEuler));
+}
+
 function punch() {
   if (!room || !myId || isStunned()) return;
   const now = performance.now();
@@ -623,8 +654,14 @@ function animate() {
   }
 
   avatars.update(dt);
+  const shaking = isStunned();
+  if (shaking) {
+    applyShake(now);
+    updateStunStars(now);
+  }
   renderer.render(scene, camera);
   if (!NO_CSS) cssRenderer.render(cssScene, camera);
+  if (shaking) camera.quaternion.copy(savedQuat);
 }
 animate();
 

@@ -685,11 +685,11 @@ function stopKaraoke() {
   karaoke = null;
 }
 
-// Âm lượng giọng theo luật gần xa. Chỉ nghe rõ nhất khi đứng gần nhau (cỡ tầm đánh nhau, 1.8 m);
-// xa hơn thì nhỏ dần rất nhanh, và từ VOICE_FAR trở ra thì không nghe thấy gì. Người đang hát thì cả phòng nghe đều.
+// Âm lượng giọng theo luật gần xa. Nghe to nhất trong VOICE_NEAR (vài ghế quanh mình);
+// xa hơn thì nhỏ dần, và từ VOICE_FAR trở ra thì không nghe thấy gì. Người đang hát thì cả phòng nghe đều.
 const VOICE_MAX = 0.6; // 3/5 âm lượng ban đầu
-const VOICE_NEAR = 1.8; // trong khoảng này nghe ở mức tối đa
-const VOICE_FAR = 8; // từ khoảng này trở ra là im
+const VOICE_NEAR = 3.5; // trong khoảng này nghe ở mức tối đa (khoảng 3 ghế)
+const VOICE_FAR = 14; // từ khoảng này trở ra là im
 const STAGE_MIC_VOLUME = 0.75; // mic sân khấu: 3/4 mức tối đa, nghe đều cả phòng
 
 // Âm lượng theo luật trên, giữa người nói (đang hát hay không) và người nghe cách nhau d mét

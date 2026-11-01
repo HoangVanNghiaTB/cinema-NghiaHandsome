@@ -1,16 +1,14 @@
-// Chuỗi hiệu ứng cho mic khi hát karaoke: lọc tiếng ù -> EQ nhẹ -> nén -> echo + reverb -> chặn đỉnh.
+// Chuỗi hiệu ứng cho mic khi hát karaoke: lọc tiếng ù -> EQ nhẹ -> nén -> echo stereo + reverb (đều nhỏ, giọng thật là chính) -> chặn đỉnh.
 // Đầu ra là một MediaStream để gửi cho mọi người; KHÔNG nối ra loa của chính người hát (không tự nghe lại,
-// tránh bị hú và độ trễ). Các thông số mặc định cố định ở đây, không chỉnh trên web.
+// tránh bị hú và độ trễ). Các thông số giọng, echo, reverb chỉnh được lúc đang hát qua bảng ở tường sau (xem mixParams.js);
+// ở đây chỉ còn những thứ cố định.
 
-const HIGHPASS_HZ = 100; // bỏ tiếng ù, tiếng "bụp" khi hơi thổi vào mic
-const MUD_CUT = { freq: 200, gain: -2, q: 1 }; // bớt đục
-const PRESENCE = { freq: 4000, gain: 2, q: 1 }; // rõ lời hơn
+import { MIX_DEFAULTS } from './mixParams.js';
+
+const MUD_Q = 1;
+const PRESENCE_Q = 1;
 // nén cho giọng đều: đoạn nhỏ không chìm, đoạn hét không chói
 const COMPRESSOR = { threshold: -24, knee: 12, ratio: 3, attack: 0.01, release: 0.15 };
-// Echo ít: lặp 1-2 lần, lần thứ 3 rất nhỏ (mỗi lần = feedback x lần trước: 0.16 -> 0.056 -> 0.020)
-const ECHO = { delay: 0.3, feedback: 0.35, wet: 0.16, lowpass: 3500 }; // delay: giây (hợp nhạc ~100 nhịp/phút)
-// Reverb như phòng lớn: vang ~1.5 giây, vang tối màu, bớt tiếng đục ở phần vang
-const REVERB = { seconds: 1.5, preDelay: 0.025, highpass: 300, lowpass: 6000, wet: 0.22 };
 // chặn đỉnh để không bị rè khi hát to
 const LIMITER = { threshold: -2, knee: 0, ratio: 20, attack: 0.003, release: 0.1 };
 
@@ -25,8 +23,10 @@ function makeImpulse(ctx, seconds) {
   return buffer;
 }
 
-// track: MediaStreamTrack của mic. Trả về { outStream, outTrack, dispose() }.
-export function createVocalChain(ctx, track) {
+// track: MediaStreamTrack của mic; params: bộ thông số theo mixParams.js (thiếu thì lấy mặc định).
+// Trả về { output, outStream, outTrack, setParams(params), dispose() }.
+export function createVocalChain(ctx, track, params = MIX_DEFAULTS) {
+  const P = { ...MIX_DEFAULTS, ...params };
   const nodes = [];
   const add = (node) => {
     nodes.push(node);
@@ -47,9 +47,9 @@ export function createVocalChain(ctx, track) {
   };
 
   const source = add(ctx.createMediaStreamSource(new MediaStream([track])));
-  const hp = filter('highpass', HIGHPASS_HZ);
-  const mud = filter('peaking', MUD_CUT.freq, MUD_CUT.gain, MUD_CUT.q);
-  const presence = filter('peaking', PRESENCE.freq, PRESENCE.gain, PRESENCE.q);
+  const hp = filter('highpass', P.hp);
+  const mud = filter('peaking', 200, P.mud, MUD_Q);
+  const presence = filter('peaking', 4000, P.presence, PRESENCE_Q);
   const comp = add(ctx.createDynamicsCompressor());
   comp.threshold.value = COMPRESSOR.threshold;
   comp.knee.value = COMPRESSOR.knee;
@@ -61,24 +61,37 @@ export function createVocalChain(ctx, track) {
   const mix = gain(1);
   comp.connect(mix); // tiếng gốc
 
-  // Echo: comp -> gửi -> delay -> lowpass -> (vòng hồi tiếp về delay) và -> mix
-  const echoSend = gain(ECHO.wet);
-  const delay = add(ctx.createDelay(1));
-  delay.delayTime.value = ECHO.delay;
-  const echoTone = filter('lowpass', ECHO.lowpass); // mỗi lần lặp tối hơn
-  const echoFeedback = gain(ECHO.feedback);
-  comp.connect(echoSend).connect(delay).connect(echoTone);
-  echoTone.connect(echoFeedback).connect(delay);
-  echoTone.connect(mix);
+  // Echo stereo: comp -> gửi -> cắt thấp -> (delay trái | delay phải), mỗi bên có lowpass và vòng hồi tiếp riêng -> mix
+  const echoSend = gain(P.echoWet / 100);
+  const echoLow = filter('highpass', P.echoHp);
+  const echoMerger = add(ctx.createChannelMerger(2));
+  comp.connect(echoSend).connect(echoLow);
+  const echoDelays = [];
+  const echoTones = [];
+  const echoFeedbacks = [];
+  [P.echoL, P.echoR].forEach((ms, channel) => {
+    const delay = add(ctx.createDelay(1));
+    delay.delayTime.value = ms / 1000;
+    const tone = filter('lowpass', P.echoLp);
+    const feedback = gain(P.echoFb / 100);
+    echoLow.connect(delay).connect(tone);
+    tone.connect(feedback).connect(delay);
+    tone.connect(echoMerger, 0, channel);
+    echoDelays.push(delay);
+    echoTones.push(tone);
+    echoFeedbacks.push(feedback);
+  });
+  echoMerger.connect(mix);
 
   // Reverb: comp -> trễ đầu -> lọc bớt đục -> vang -> lọc bớt chói -> mix
   const preDelay = add(ctx.createDelay(0.5));
-  preDelay.delayTime.value = REVERB.preDelay;
-  const reverbLow = filter('highpass', REVERB.highpass);
+  preDelay.delayTime.value = P.revPre / 1000;
+  const reverbLow = filter('highpass', P.revHp);
   const convolver = add(ctx.createConvolver());
-  convolver.buffer = makeImpulse(ctx, REVERB.seconds);
-  const reverbTone = filter('lowpass', REVERB.lowpass);
-  const reverbWet = gain(REVERB.wet);
+  let impulseSeconds = P.revTime;
+  convolver.buffer = makeImpulse(ctx, impulseSeconds);
+  const reverbTone = filter('lowpass', P.revLp);
+  const reverbWet = gain(P.revWet / 100);
   comp.connect(preDelay).connect(reverbLow).connect(convolver).connect(reverbTone).connect(reverbWet).connect(mix);
 
   const limiter = add(ctx.createDynamicsCompressor());
@@ -90,11 +103,41 @@ export function createVocalChain(ctx, track) {
   const out = add(ctx.createMediaStreamDestination());
   mix.connect(limiter).connect(out);
 
+  // Đổi thông số lúc đang hát: giá trị đổi êm (không lách tách); chỉ thời gian vang phải dựng lại tiếng vang nên đợi
+  // người chỉnh dừng tay một chút (kéo thanh liên tục không dựng lại mỗi lần)
+  const set = (param, value) => param.setTargetAtTime(value, ctx.currentTime, 0.03);
+  let impulseTimer = null;
+  const setParams = (next) => {
+    Object.assign(P, next);
+    set(hp.frequency, P.hp);
+    set(mud.gain, P.mud);
+    set(presence.gain, P.presence);
+    set(echoSend.gain, P.echoWet / 100);
+    set(echoLow.frequency, P.echoHp);
+    echoDelays[0] && set(echoDelays[0].delayTime, P.echoL / 1000);
+    echoDelays[1] && set(echoDelays[1].delayTime, P.echoR / 1000);
+    echoTones.forEach((t) => set(t.frequency, P.echoLp));
+    echoFeedbacks.forEach((f) => set(f.gain, P.echoFb / 100));
+    set(preDelay.delayTime, P.revPre / 1000);
+    set(reverbLow.frequency, P.revHp);
+    set(reverbTone.frequency, P.revLp);
+    set(reverbWet.gain, P.revWet / 100);
+    if (Math.abs(P.revTime - impulseSeconds) >= 0.05 && !impulseTimer) {
+      impulseTimer = setTimeout(() => {
+        impulseTimer = null;
+        impulseSeconds = P.revTime;
+        convolver.buffer = makeImpulse(ctx, impulseSeconds);
+      }, 250);
+    }
+  };
+
   return {
+    setParams,
     output: limiter, // đầu ra dạng nút Web Audio, để nối thêm bộ chỉnh âm lượng riêng cho từng người nghe
     outStream: out.stream,
     outTrack: out.stream.getAudioTracks()[0],
     dispose() {
+      clearTimeout(impulseTimer);
       nodes.forEach((n) => n.disconnect());
     },
   };

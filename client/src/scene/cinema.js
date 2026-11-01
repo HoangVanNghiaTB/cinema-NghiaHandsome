@@ -15,6 +15,10 @@ const AMBIENT_INTENSITY = 0.3;
 const WALL_PHOTO_URL = '/wall-photo.jpg';
 const WALL_PHOTO_HEIGHT = 1.96; // m; chiều rộng tính theo tỉ lệ ảnh. Bằng nửa kích cỡ lúc treo trên trần (~3.9 m)
 
+// Bảng chỉnh âm mic hát: treo sát tường sau, ngay dưới bức ảnh (tâm cao 2.65 m, sàn chỗ đó cao 1.2 m nên ngang tầm mắt).
+// Đứng trong MIXER.reach (m) trước bảng thì nhấn E mở bảng chỉnh (giao diện ở main.js / index.html).
+export const MIXER = { x: 0, z: ROOM.maxZ - 0.06, y: 2.65, width: 1.7, height: 1.0, reach: 2.2 };
+
 // Đèn sân khấu: mỗi sân khấu có một đèn treo ngay trên đầu người hát, chỉ sáng khi có người hát (setStageLight).
 // Gồm chùm sáng hình nón + vòng sáng tròn trên sàn sân khấu (giả bằng hình trong suốt cộng sáng, rất nhẹ);
 // chế độ chất lượng cao có thêm một SpotLight thật để rọi sáng cả người hát.
@@ -156,6 +160,49 @@ export function resolveCollisions(x, z, radius) {
   return { x, z };
 }
 
+// Hình bảng chỉnh âm: khung kim loại tối, ba cụm cần gạt (Giọng, Echo, Reverb) kèm dòng hướng dẫn. Chỉ là hình trang trí,
+// thông số thật chỉnh ở bảng HTML mở bằng phím E.
+function buildMixerPanel(scene) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 680;
+  canvas.height = 400;
+  const g = canvas.getContext('2d');
+  g.fillStyle = '#14161c';
+  g.fillRect(0, 0, 680, 400);
+  g.strokeStyle = '#3a4050';
+  g.lineWidth = 6;
+  g.strokeRect(3, 3, 674, 394);
+  g.fillStyle = '#ffd36b';
+  g.font = 'bold 34px sans-serif';
+  g.textAlign = 'center';
+  g.fillText('BẢNG ÂM THANH MIC HÁT', 340, 54);
+  const groups = [['GIỌNG', '#6bd1ff', [0.7, 0.45, 0.6, 0.55]], ['ECHO', '#9dff9d', [0.3, 0.5, 0.5, 0.4, 0.6]], ['REVERB', '#ff9dd1', [0.25, 0.6, 0.35, 0.5, 0.65]]];
+  groups.forEach(([title, color, levels], gi) => {
+    const x0 = 30 + gi * 215;
+    g.fillStyle = color;
+    g.font = 'bold 22px sans-serif';
+    g.fillText(title, x0 + 90, 100);
+    levels.forEach((lv, i) => {
+      const x = x0 + 12 + i * (levels.length === 4 ? 52 : 40);
+      g.fillStyle = '#05060a';
+      g.fillRect(x - 4, 120, 8, 190);
+      g.fillStyle = color;
+      g.fillRect(x - 15, 120 + (1 - lv) * 160, 30, 30);
+    });
+  });
+  g.fillStyle = '#ffffff';
+  g.font = '24px sans-serif';
+  g.fillText('Đứng gần và nhấn E để chỉnh', 340, 365);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const face = new THREE.Mesh(new THREE.PlaneGeometry(MIXER.width, MIXER.height), new THREE.MeshBasicMaterial({ map: texture, color: 0xdddddd }));
+  face.position.set(MIXER.x, MIXER.y, MIXER.z);
+  face.rotation.y = Math.PI; // mặt hướng vào phòng
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(MIXER.width + 0.1, MIXER.height + 0.1, 0.04), new THREE.MeshLambertMaterial({ color: 0x23262e }));
+  frame.position.set(MIXER.x, MIXER.y, MIXER.z + 0.03);
+  scene.add(frame, face);
+}
+
 export function buildCinema(scene, { lowQuality = false } = {}) {
   // Lambert rẻ hơn PBR nhiều khi có nhiều đèn, mà nhìn gần như nhau với bề mặt nhám
   const darkWall = new THREE.MeshLambertMaterial({ color: 0x15151a }); // trần
@@ -194,6 +241,8 @@ export function buildCinema(scene, { lowQuality = false } = {}) {
     photo.position.set(cx, ROOM.height / 2, ROOM.maxZ - 0.02); // sát tường, thụt ra chút để không bị chập mặt
     scene.add(photo);
   });
+
+  buildMixerPanel(scene);
 
   // 4 bức tường (mặt trong hướng vào phòng)
   const wall = (width, x, z, rotY) => {

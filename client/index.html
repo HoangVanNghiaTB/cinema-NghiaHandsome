@@ -42,6 +42,27 @@
         background: rgba(0, 0, 0, 0.75); color: #fff;
       }
       #menu { display: none; }
+      /* Bảng chỉnh âm mic hát (mở bằng phím E trước bảng ở tường sau) */
+      #mixer {
+        display: none; position: fixed; inset: 0; z-index: 12; align-items: center; justify-content: center;
+        background: rgba(0, 0, 0, 0.6); color: #fff;
+      }
+      #mixer .box {
+        background: #14161c; border: 1px solid #3a4050; border-radius: 10px; padding: 14px 18px;
+        max-width: 96vw; max-height: 94vh; overflow: auto; box-sizing: border-box;
+      }
+      #mixer h2 { margin: 0 0 2px; font-size: 18px; color: #ffd36b; }
+      #mixer small { opacity: 0.65; }
+      #mixer-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 6px 22px; margin: 10px 0; }
+      #mixer .mix-group h3 { margin: 6px 0; font-size: 14px; color: #6bd1ff; }
+      #mixer .mix-row { display: grid; grid-template-columns: 1fr auto; gap: 0 8px; margin-bottom: 6px; font-size: 13px; }
+      #mixer .mix-row b { font-weight: normal; opacity: 0.85; }
+      #mixer .mix-row input { grid-column: 1 / -1; width: 100%; touch-action: pan-y; }
+      #mixer-plain { width: 100%; margin: 4px 0 8px; font-size: 13px; padding: 8px; cursor: pointer; }
+      #mixer-plain.on { background: #0a8a4a; color: #fff; border-color: #0a8a4a; }
+      #mixer-groups.plain .mix-row { opacity: 0.4; } /* đang giống mic thường: các thanh không có tác dụng */
+      #mixer .actions { display: flex; gap: 8px; justify-content: flex-end; }
+      #mixer button { font-size: 14px; padding: 8px 14px; cursor: pointer; }
       #login { z-index: 20; background: #000; }
       #menu button, #login button { font-size: 16px; padding: 10px 20px; cursor: pointer; }
       #menu #enter { font-size: 20px; padding: 12px 28px; }
@@ -262,6 +283,18 @@
         <button id="btn-sit">Ngồi</button>
         <button id="btn-chat" aria-label="Chat">&#128172;</button>
         <button id="btn-mic" aria-label="Mic">&#128263;</button>
+      </div>
+    </div>
+
+    <div id="mixer">
+      <div class="box">
+        <h2>Bảng âm thanh mic hát</h2>
+        <small>Cả phòng dùng chung: bạn chỉnh thì người đang hát và khán giả nghe đổi theo ngay. Nhấn E hoặc Esc để đóng.</small>
+        <div id="mixer-groups"></div>
+        <div class="actions">
+          <button id="mixer-reset">Về mặc định</button>
+          <button id="mixer-close">Đóng</button>
+        </div>
       </div>
     </div>
 

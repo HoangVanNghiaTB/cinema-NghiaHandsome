@@ -3,11 +3,11 @@ import { io } from 'socket.io-client';
 // Dev: server chạy riêng ở cổng 3000. Production: cùng origin với trang.
 const SERVER_URL = import.meta.env.DEV ? `http://${location.hostname}:3000` : undefined;
 
-// handlers: { onInit(id, players, video, iceServers), onJoin(player), onMove(data), onLeave(id), onFull(),
+// handlers: { onInit(id, players, video, iceServers, mix), onJoin(player), onMove(data), onLeave(id), onFull(),
 //             onStatus(connected), onVideo({ videoId, playing, position }), onSignal(from, data),
 //             onChat({ id, name, text }), onSeat({ id, seat }), onSeatDenied(),
 //             onStun({ id, by, duration }), onStage({ id, stage }), onStageDenied(),
-//             onEmote({ id, type, on? }), onSwing({ id }) }
+//             onEmote({ id, type, on? }), onSwing({ id }), onMix(params) }
 export function connectToRoom({ name, color }, handlers) {
   const socket = io(SERVER_URL);
 
@@ -16,7 +16,8 @@ export function connectToRoom({ name, color }, handlers) {
     socket.emit('join', { name, color });
   });
   socket.on('disconnect', () => handlers.onStatus?.(false));
-  socket.on('init', ({ id, players, video, iceServers }) => handlers.onInit?.(id, players, video, iceServers));
+  socket.on('init', ({ id, players, video, iceServers, mix }) => handlers.onInit?.(id, players, video, iceServers, mix));
+  socket.on('mix-state', (m) => handlers.onMix?.(m));
   socket.on('video-state', (v) => handlers.onVideo?.(v));
   socket.on('signal', ({ from, data }) => handlers.onSignal?.(from, data));
   socket.on('chat', (m) => handlers.onChat?.(m));
@@ -41,6 +42,8 @@ export function connectToRoom({ name, color }, handlers) {
     sit: (seat) => socket.emit('sit', { seat }),
     stand: () => socket.emit('stand'),
     sendChat: (text) => socket.emit('chat', { text }),
+    setMix: (key, value) => socket.emit('mix-set', { key, value }),
+    resetMix: () => socket.emit('mix-reset'),
     close: () => socket.close(),
     sendSignal: (to, data) => socket.emit('signal', { to, data }),
     loadVideo: (videoId) => socket.emit('video-load', { videoId }),

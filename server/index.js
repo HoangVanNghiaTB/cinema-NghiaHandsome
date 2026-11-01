@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import path from 'path';
 import express from 'express';
 import { Server } from 'socket.io';
+import { MIX_PARAMS, MIX_DEFAULTS, cleanMixValue } from '../client/src/audio/mixParams.js';
 
 const PORT = process.env.PORT || 3000;
 const MAX_PLAYERS = 10;
@@ -46,6 +47,9 @@ if (existsSync(distDir)) {
 const httpServer = createServer(app);
 // Khi chạy thật, trang và socket cùng origin nên không cần CORS; chỉ mở khi dev (client ở cổng 5173)
 const io = new Server(httpServer, isProd ? {} : { cors: { origin: true } });
+
+// Bảng chỉnh âm mic hát: cả phòng dùng chung một bộ thông số (xem client/src/audio/mixParams.js)
+let mix = { ...MIX_DEFAULTS };
 
 // Một phòng duy nhất: id socket -> { id, name, color, x, y, z, ry }
 const players = new Map();
@@ -111,6 +115,7 @@ io.on('connection', (socket) => {
       id: socket.id,
       players: [...players.values()].filter((p) => p.id !== socket.id),
       video: videoSnapshot(),
+      mix,
       iceServers,
     });
     socket.broadcast.emit('player-joined', player);
@@ -231,6 +236,18 @@ io.on('connection', (socket) => {
     io.to(msg.to).emit('signal', { from: socket.id, data: msg.data });
   });
 
+  // Bảng chỉnh âm: ai trong phòng cũng chỉnh được; server kiểm tra giá trị rồi chuyển cho những người còn lại
+  socket.on('mix-set', (data = {}) => {
+    if (!players.has(socket.id) || !MIX_PARAMS.some((p) => p.key === data.key)) return;
+    mix = { ...mix, [data.key]: cleanMixValue(data.key, data.value) };
+    socket.broadcast.emit('mix-state', mix);
+  });
+  socket.on('mix-reset', () => {
+    if (!players.has(socket.id)) return;
+    mix = { ...MIX_DEFAULTS };
+    io.emit('mix-state', mix);
+  });
+
   // Ai trong phòng cũng điều khiển được video
   socket.on('video-load', (data = {}) => {
     if (!players.has(socket.id) || !/^[\w-]{11}$/.test(data.videoId)) return;
@@ -252,8 +269,11 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     if (!players.delete(socket.id)) return;
     io.emit('player-left', socket.id);
-    // Phòng trống thì xoá video cũ
-    if (players.size === 0) video = { videoId: null, playing: false, position: 0, updatedAt: Date.now() };
+    // Phòng trống thì xoá video cũ và trả bảng chỉnh âm về mặc định
+    if (players.size === 0) {
+      video = { videoId: null, playing: false, position: 0, updatedAt: Date.now() };
+      mix = { ...MIX_DEFAULTS };
+    }
   });
 });
 

@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls.js';
 import { CSS3DRenderer, CSS3DObject } from 'three/examples/jsm/renderers/CSS3DRenderer.js';
-import { buildCinema, floorHeight, resolveCollisions, ROOM, SCREEN, SEATS, STAGES } from './scene/cinema.js';
+import { buildCinema, floorHeight, resolveCollisions, MIXER, ROOM, SCREEN, SEATS, STAGES } from './scene/cinema.js';
+import { MIX_DEFAULTS, MIX_GROUPS, MIX_PARAMS } from './audio/mixParams.js';
 import { createTouchControls } from './ui/touch.js';
 import { viewW, viewH } from './ui/viewport.js';
 import { StunRing } from './scene/stunRing.js';
@@ -403,8 +404,9 @@ function joinRoom(profile) {
   selfAvatar.remove(SELF);
   selfAvatar.add({ id: SELF, name: profile.name, color: profile.color });
   room = connectToRoom(profile, {
-    onInit: (id, others, video, iceServers) => {
+    onInit: (id, others, video, iceServers, mix) => {
       myId = id;
+      setMix(mix ?? MIX_DEFAULTS);
       names.clear();
       seatOwners.clear();
       stageOwners.clear();
@@ -424,6 +426,7 @@ function joinRoom(profile) {
       setDesired(video);
     },
     onVideo: setDesired,
+    onMix: setMix,
     onJoin: (p) => {
       avatars.add(p);
       names.set(p.id, p.name);
@@ -690,11 +693,12 @@ function stopKaraoke() {
 const VOICE_MAX = 0.6; // 3/5 âm lượng ban đầu
 const VOICE_NEAR = 3.5; // trong khoảng này nghe ở mức tối đa (khoảng 3 ghế)
 const VOICE_FAR = 14; // từ khoảng này trở ra là im
-const STAGE_MIC_VOLUME = 0.75; // mic sân khấu: 3/4 mức tối đa, nghe đều cả phòng
+// Âm lượng mic sân khấu (mặc định 3/4 mức tối đa), nghe đều cả phòng; chỉnh ở bảng âm thanh (thanh "Âm lượng mic hát")
+const stageMicVolume = () => mixState.level / 100;
 
 // Âm lượng theo luật trên, giữa người nói (đang hát hay không) và người nghe cách nhau d mét
 function designVolume(singer, d) {
-  if (singer) return STAGE_MIC_VOLUME;
+  if (singer && !mixState.plain) return stageMicVolume(); // "giống mic thường": tính gần/xa như voice
   const t = THREE.MathUtils.clamp((d - VOICE_NEAR) / (VOICE_FAR - VOICE_NEAR), 0, 1);
   return VOICE_MAX * (1 - t) ** 2; // giảm nhanh ở gần rồi nhỏ dần tới 0
 }
@@ -721,6 +725,112 @@ function setMic(on) {
   if (voiceMode === 'mic' && micOn !== on) toggleMic();
 }
 
+// Bảng chỉnh âm mic hát (treo dưới bức ảnh tường sau). Thông số dùng chung cả phòng qua server: ai chỉnh thì người đang hát
+// và khán giả nghe đổi theo ngay. Chỉ người hát dựng chuỗi hiệu ứng, nhưng máy nào cũng nhận bộ thông số để dùng khi tới lượt.
+let mixState = { ...MIX_DEFAULTS };
+let mixerOpen = false;
+const mixerEl = $('mixer');
+const mixerControls = new Map(); // key -> { slider, label, p }
+const MIX_SEND_MS = 80; // kéo thanh thì gom lại, mỗi thanh gửi tối đa ~12 lần/giây
+const mixPending = new Map();
+let mixSendTimer = null;
+
+const fmtMix = (p, v) => `${p.step < 1 ? Number(v).toFixed(1) : Math.round(v)} ${p.unit}`;
+function buildMixerUi() {
+  const host = $('mixer-groups');
+  for (const group of MIX_GROUPS) {
+    const col = document.createElement('div');
+    col.className = 'mix-group';
+    const h = document.createElement('h3');
+    h.textContent = group.title;
+    col.appendChild(h);
+    if (group.id === 'voice') {
+      const plainBtn = document.createElement('button');
+      plainBtn.id = 'mixer-plain';
+      plainBtn.addEventListener('click', () => {
+        setMix({ ...mixState, plain: mixState.plain ? 0 : 1 });
+        room?.setMix('plain', mixState.plain);
+      });
+      col.appendChild(plainBtn);
+    }
+    for (const p of MIX_PARAMS.filter((x) => x.group === group.id && x.type !== 'toggle')) {
+      const row = document.createElement('label');
+      row.className = 'mix-row';
+      const name = document.createElement('span');
+      name.textContent = p.label;
+      const label = document.createElement('b');
+      const slider = document.createElement('input');
+      slider.type = 'range';
+      slider.min = p.min;
+      slider.max = p.max;
+      slider.step = p.step;
+      slider.value = mixState[p.key];
+      label.textContent = fmtMix(p, mixState[p.key]);
+      slider.addEventListener('input', () => {
+        const v = Number(slider.value);
+        mixState[p.key] = v;
+        label.textContent = fmtMix(p, v);
+        voice.setSingParams(mixState);
+        mixPending.set(p.key, v);
+        mixSendTimer ??= setTimeout(flushMix, MIX_SEND_MS);
+      });
+      row.append(name, label, slider);
+      col.appendChild(row);
+      mixerControls.set(p.key, { slider, label, p });
+    }
+    host.appendChild(col);
+  }
+}
+function flushMix() {
+  mixSendTimer = null;
+  for (const [key, value] of mixPending) room?.setMix(key, value);
+  mixPending.clear();
+}
+// Nhận bộ thông số mới (từ server hoặc nút mặc định): áp dụng cho chuỗi hát và cập nhật các thanh trượt
+function setMix(next) {
+  mixState = { ...MIX_DEFAULTS, ...next };
+  voice.setSingParams(mixState);
+  const plain = !!mixState.plain;
+  const plainBtn = $('mixer-plain');
+  plainBtn.textContent = plain ? 'Đang: giống mic thường (bấm để bật hiệu ứng)' : 'Giống mic thường (tắt echo, reverb...)';
+  plainBtn.classList.toggle('on', plain);
+  $('mixer-groups').classList.toggle('plain', plain);
+  for (const [key, c] of mixerControls) {
+    c.slider.value = mixState[key];
+    c.label.textContent = fmtMix(c.p, mixState[key]);
+  }
+}
+buildMixerUi();
+$('mixer-reset').addEventListener('click', () => {
+  setMix(MIX_DEFAULTS);
+  room?.resetMix();
+});
+
+// Đứng (không ngồi, không hát) trong tầm của bảng
+function nearMixer() {
+  if (mySeat !== null || myStage !== null) return false;
+  return Math.hypot(camera.position.x - MIXER.x, camera.position.z - MIXER.z) <= MIXER.reach;
+}
+function openMixer() {
+  if (mixerOpen) return;
+  mixerOpen = true; // đặt trước khi mở khoá con trỏ để sự kiện unlock không bật menu
+  mixerEl.style.display = 'flex';
+  keys.clear();
+  if (isTouch) touch.setVisible(false);
+  else controls.unlock();
+}
+function closeMixer() {
+  if (!mixerOpen) return;
+  mixerOpen = false;
+  mixerEl.style.display = 'none';
+  if (isTouch) touch.setVisible(true);
+  else controls.lock();
+}
+$('mixer-close').addEventListener('click', closeMixer);
+addEventListener('keydown', (e) => {
+  if (mixerOpen && (e.code === 'Escape' || e.code === 'KeyE')) closeMixer();
+});
+
 // Phím E / nút trên điện thoại: đứng dậy, dừng hát, hoặc ngồi/hát nếu đang đứng gần chỗ trống
 function interact() {
   if (!room || !myId || isStunned()) return;
@@ -730,6 +840,10 @@ function interact() {
   }
   if (myStage !== null) {
     room.stopSing();
+    return;
+  }
+  if (nearMixer()) {
+    openMixer();
     return;
   }
   if (nearestFreeStage() >= 0) {
@@ -757,6 +871,7 @@ function updateSitPrompt() {
   if (isActive()) {
     if (mySeat !== null) text = isTouch ? 'Đứng' : 'Nhấn E để đứng dậy';
     else if (myStage !== null) text = isTouch ? 'Dừng hát' : 'Nhấn E để dừng hát';
+    else if (nearMixer()) text = isTouch ? 'Chỉnh âm' : 'Nhấn E để chỉnh âm thanh mic hát';
     else if (nearestFreeStage() >= 0) text = isTouch ? 'Hát' : 'Nhấn E để hát';
     else if (nearestFreeSeat() >= 0) text = isTouch ? 'Ngồi' : 'Nhấn E để ngồi';
   }
@@ -898,7 +1013,7 @@ function setActive(active) {
     applyDesired(); // sau thao tác click đầu tiên, trình duyệt cho phép phát có tiếng
   } else {
     document.body.classList.add('show-chat');
-    if (!chatting && login.style.display === 'none') menu.style.display = 'flex'; // đang chat thì không hiện menu
+    if (!chatting && !mixerOpen && login.style.display === 'none') menu.style.display = 'flex'; // đang chat thì không hiện menu
   }
 }
 

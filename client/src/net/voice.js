@@ -30,6 +30,7 @@ export function createVoice({ sendSignal, onSpeaking, onSelfSpeaking, getVolume,
   let audioCtx = null;
   let singing = null; // { chain } khi đang hát: gửi tiếng đã qua hiệu ứng thay cho tiếng mic thường
   let singingToken = 0; // để bỏ qua kết quả của lần bật hát đã bị dừng giữa chừng
+  let singParams = null; // thông số bảng chỉnh âm mic hát (null = mặc định)
   let sendMode = 'raw'; // 'gain' (hạ âm lượng riêng cho từng người nghe) hoặc 'raw' (gửi giọng gốc)
   let micSource = null; // nguồn mic trong Web Audio (chỉ khi sendMode = 'gain')
   let sendUpstream = null; // nút đang cấp giọng cho các bộ chỉnh âm lượng: micSource, hoặc đầu ra chuỗi hiệu ứng khi hát
@@ -256,6 +257,27 @@ export function createVoice({ sendSignal, onSpeaking, onSelfSpeaking, getVolume,
     sendUpstream = node;
   }
 
+  // Hát theo hai cách: chuỗi hiệu ứng (mặc định) hoặc "giống mic thường" (thông số plain của bảng chỉnh âm): gửi thẳng mic,
+  // bật lại khử nhiễu/tự chỉnh âm lượng, bitrate thường; bên người nghe cũng tính âm lượng theo khoảng cách như voice.
+  function setSingPath(plain) {
+    if (!singing || singing.plain === plain) return;
+    singing.plain = plain;
+    const track = localStream?.getAudioTracks()[0];
+    if (plain) {
+      if (sendMode === 'gain') setSendUpstream(micSource);
+      else replaceOutgoingTrack(track);
+      applyBitrate(null);
+      restoreMicConstraints();
+    } else {
+      track
+        ?.applyConstraints({ echoCancellation: true, noiseSuppression: false, autoGainControl: false })
+        .catch(() => {});
+      if (sendMode === 'gain') setSendUpstream(singing.chain.output);
+      else replaceOutgoingTrack(singing.chain.outTrack);
+      applyBitrate(SING_BITRATE);
+    }
+  }
+
   function restoreMicConstraints() {
     const track = localStream?.getAudioTracks()[0];
     track?.applyConstraints({ echoCancellation: true, noiseSuppression: true, autoGainControl: true }).catch(() => {});
@@ -385,6 +407,13 @@ export function createVoice({ sendSignal, onSpeaking, onSelfSpeaking, getVolume,
       return { connected, total: roster.size };
     },
 
+    // Thông số bảng chỉnh âm (mixParams.js): áp dụng ngay nếu đang hát, và dùng cho lần hát sau
+    setSingParams(params) {
+      singParams = { ...params };
+      singing?.chain.setParams(singParams);
+      setSingPath(!!singParams.plain);
+    },
+
     // Bắt đầu hát: gửi tiếng mic đã qua chuỗi hiệu ứng (echo, reverb...) thay cho tiếng mic thường.
     // Người hát KHÔNG nghe lại giọng của chính mình. Bật/tắt mic (toggleMic) vẫn hoạt động như thường.
     async startSinging() {
@@ -405,17 +434,18 @@ export function createVoice({ sendSignal, onSpeaking, onSelfSpeaking, getVolume,
       if (audioCtx.state === 'suspended') await audioCtx.resume().catch(() => {});
       let chain;
       try {
-        chain = createVocalChain(audioCtx, track);
+        chain = createVocalChain(audioCtx, track, singParams);
       } catch (err) {
         // thiết bị không dựng được chuỗi hiệu ứng: vẫn hát được, chỉ là bằng giọng mic thường
         console.warn('Voice: không dựng được hiệu ứng khi hát, hát bằng mic thường', err);
         restoreMicConstraints();
         return;
       }
-      singing = { chain };
+      singing = { chain, plain: false };
       if (sendMode === 'gain') setSendUpstream(chain.output);
       else replaceOutgoingTrack(chain.outTrack);
       applyBitrate(SING_BITRATE);
+      setSingPath(!!singParams?.plain); // bảng đang ở chế độ "giống mic thường" thì chuyển ngay
     },
 
     // Hát xong: trả về mic thường

@@ -112,6 +112,14 @@ export function createTouchControls({ onLook, onMenu, onMic, onChat, onSit, onPu
   const btnEye = $('btn-eye');
   btnEye.addEventListener('click', onEye);
 
+  // Nút nhỏ ẩn/hiện toàn bộ phím ảo (cần gạt, cụm nút, nút góc nhìn); menu và nút này luôn còn
+  const btnHide = $('btn-hide');
+  btnHide.addEventListener('click', () => {
+    const hidden = root.classList.toggle('ui-hidden');
+    btnHide.classList.toggle('on', hidden);
+    if (hidden) resetJoy();
+  });
+
   // Nút "Hành động" mở một hàng biểu tượng nhỏ; chọn xong thì đóng lại. Chạm ra ngoài cũng đóng.
   const panel = $('action-panel');
   $('btn-actions').addEventListener('click', () => {

@@ -154,11 +154,11 @@ for (const key of Object.keys(volumes)) {
 const FPS_KEY = 'cinema-show-fps';
 const fpsEl = $('fps');
 const fpsCheckbox = $('show-fps');
-let showFps = true;
+let showFps = false;
 try {
-  showFps = localStorage.getItem(FPS_KEY) !== 'off';
+  showFps = localStorage.getItem(FPS_KEY) === 'on';
 } catch {
-  // không đọc được thì để mặc định là hiện
+  // không đọc được thì để mặc định là ẩn
 }
 function applyShowFps() {
   fpsCheckbox.checked = showFps;

@@ -10,6 +10,10 @@ const MAX_PLAYERS = 10;
 const SEAT_COUNT = 18; // phải khớp SEATS.length ở client/src/scene/cinema.js
 const STAGE_COUNT = 2; // phải khớp STAGES.length ở client/src/scene/cinema.js; mỗi sân khấu một mic, một người hát
 
+// Hành động (emote): server chỉ nhận loại có trong danh sách này, và chặn gửi liên tục (thời gian chờ mỗi loại, ms).
+// clap, confetti, heart là hành động bắn một lần; lightstick là trạng thái bật/tắt (server nhớ để người vào sau thấy)
+const EMOTE_COOLDOWN_MS = { clap: 3000, confetti: 2500, heart: 3500, lightstick: 400 };
+
 // Đánh nhau: server kiểm tra tầm đánh, hướng nhìn và thời gian chờ để không ai gian lận hay spam
 const PUNCH_RANGE = 1.8; // m
 const PUNCH_FRONT_COS = 0.5; // mục tiêu phải nằm trong góc ±60° phía trước người đánh
@@ -95,6 +99,8 @@ io.on('connection', (socket) => {
       ry: 0,
       seat: null, // chỉ số ghế đang ngồi, hoặc null
       stage: null, // chỉ số sân khấu đang hát, hoặc null
+      holding: null, // vật đang cầm ('lightstick'), hoặc null
+      emoteAt: {}, // loại hành động -> lần cuối làm (để tính thời gian chờ)
       lastPunchAt: 0,
       stunnedUntil: 0,
       immuneUntil: 0,
@@ -117,6 +123,21 @@ io.on('connection', (socket) => {
     p.z = num(data.z);
     p.ry = num(data.ry);
     socket.volatile.broadcast.emit('player-moved', { id: p.id, x: p.x, y: p.y, z: p.z, ry: p.ry });
+  });
+
+  // Hành động: ngồi, hát, đang ở đâu cũng làm được; bị choáng thì không
+  socket.on('emote', (data = {}) => {
+    const p = players.get(socket.id);
+    if (!p || !Object.hasOwn(EMOTE_COOLDOWN_MS, data.type)) return;
+    const now = Date.now();
+    if (now < p.stunnedUntil || now - (p.emoteAt[data.type] ?? 0) < EMOTE_COOLDOWN_MS[data.type]) return;
+    p.emoteAt[data.type] = now;
+    if (data.type === 'lightstick') {
+      p.holding = p.holding ? null : 'lightstick'; // bấm để cầm, bấm lại để cất
+      io.emit('emote', { id: p.id, type: 'lightstick', on: p.holding !== null });
+    } else {
+      io.emit('emote', { id: p.id, type: data.type });
+    }
   });
 
   // Ngồi ghế: server quyết định ghế còn trống hay không (một ghế một người)
@@ -170,6 +191,7 @@ io.on('connection', (socket) => {
     const now = Date.now();
     if (now - p.lastPunchAt < PUNCH_COOLDOWN_MS || now < p.stunnedUntil) return;
     p.lastPunchAt = now;
+    io.emit('swing', { id: p.id }); // mọi cú tát đều hiện tay vung ra, trúng hay hụt
 
     const fx = -Math.sin(p.ry);
     const fz = -Math.cos(p.ry);

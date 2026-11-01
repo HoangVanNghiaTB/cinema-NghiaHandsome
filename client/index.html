@@ -4,7 +4,26 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>Rạp chiếu phim 3D</title>
+    <script>
+      // Điện thoại để dọc: xoay cả trang thành ngang (không cần người dùng xoay máy / tắt khoá xoay)
+      (function () {
+        var root = document.documentElement;
+        function fit() {
+          var rotate = matchMedia('(pointer: coarse)').matches && innerHeight > innerWidth;
+          root.classList.toggle('force-land', rotate);
+          root.style.setProperty('--sw', innerWidth + 'px');
+          root.style.setProperty('--sh', innerHeight + 'px');
+        }
+        fit();
+        addEventListener('resize', fit);
+        addEventListener('orientationchange', fit);
+      })();
+    </script>
     <style>
+      html.force-land body {
+        position: fixed; top: 0; left: 0; width: var(--sh); height: var(--sw);
+        transform-origin: 0 0; transform: translateX(var(--sw)) rotate(90deg);
+      }
       html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font-family: sans-serif; }
       #css-layer, #gl-layer { position: absolute; inset: 0; }
       #css-layer { pointer-events: none; }
@@ -22,6 +41,19 @@
       #menu input[type="text"], #login input[type="text"] { width: 380px; max-width: 80vw; font-size: 16px; padding: 10px; }
       #login input[type="color"] { width: 48px; height: 40px; padding: 0; border: 0; background: none; cursor: pointer; }
       #menu small { opacity: 0.6; }
+
+      /* Nút điều khiển video: nhỏ gọn, chỉ có biểu tượng (kèm số lượng tua) */
+      #menu .vbtn {
+        display: inline-flex; align-items: center; justify-content: center; gap: 2px;
+        padding: 3px 7px; min-height: 28px; font-size: 11px; line-height: 1; cursor: pointer;
+      }
+      #menu .vbtn svg { width: 15px; height: 15px; flex: none; }
+      #menu .vbtn span { opacity: 0.85; }
+      #menu .video-controls { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; max-width: 92vw; }
+      #playpause .icon-pause { display: none; }
+      #playpause.is-playing .icon-play { display: none; }
+      #playpause.is-playing .icon-pause { display: block; }
+      @media (pointer: coarse) { #menu .vbtn { min-height: 34px; } }
       #menu .sliders {
         display: grid; grid-template-columns: auto minmax(120px, 220px) 3.5em; gap: 8px 12px; align-items: center;
         max-width: 92vw;
@@ -56,30 +88,82 @@
         pointer-events: none; color: #fff; background: rgba(0, 0, 0, 0.6); padding: 8px 16px; border-radius: 6px; font-size: 16px;
       }
 
+      /* Intro nhà phát hành: chữ hiện lần lượt từng chữ cái, quét sáng một vệt, rồi mờ dần để lộ màn hình nhập tên */
+      #intro {
+        position: fixed; inset: 0; z-index: 200; background: #000; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; gap: 14px; color: #fff; cursor: pointer;
+        animation: intro-out 0.7s ease 3.9s forwards;
+      }
+      #intro .logo { font-size: clamp(26px, 7vw, 72px); font-weight: 800; letter-spacing: 0.08em; display: flex; position: relative; overflow: hidden; padding: 0 0.1em; }
+      #intro .logo span {
+        opacity: 0; transform: translateY(0.4em) scale(0.9); filter: blur(8px);
+        animation: intro-letter 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) forwards; animation-delay: calc(0.5s + var(--i) * 0.07s);
+      }
+      #intro .logo::after {
+        content: ''; position: absolute; top: 0; bottom: 0; width: 30%; left: -40%;
+        background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.85), transparent); mix-blend-mode: overlay;
+        animation: intro-shine 0.9s ease 2.4s forwards;
+      }
+      #intro .tag { font-size: clamp(11px, 2.4vw, 16px); letter-spacing: 0.5em; opacity: 0; text-transform: uppercase; animation: intro-fade 0.8s ease 2.6s forwards; }
+      #intro .line { width: 0; height: 2px; background: #fff; box-shadow: 0 0 12px #fff; animation: intro-line 0.9s ease 2.2s forwards; }
+      @keyframes intro-letter { to { opacity: 1; transform: none; filter: blur(0); } }
+      @keyframes intro-shine { to { left: 120%; } }
+      @keyframes intro-fade { to { opacity: 0.7; } }
+      @keyframes intro-line { to { width: min(60vw, 420px); } }
+      @keyframes intro-out { to { opacity: 0; visibility: hidden; } }
+
       /* Điều khiển cảm ứng (chỉ hiện trên điện thoại, khi đang ở trong rạp) */
       #touch-ui { display: none; position: fixed; inset: 0; z-index: 4; pointer-events: none; }
       #look-zone { position: absolute; top: 0; right: 0; width: 55%; height: 100%; pointer-events: auto; touch-action: none; }
       #joy {
         position: absolute; left: max(24px, env(safe-area-inset-left)); bottom: max(24px, env(safe-area-inset-bottom));
-        width: 150px; height: 150px; border-radius: 50%; pointer-events: auto; touch-action: none;
+        width: 130px; height: 130px; border-radius: 50%; pointer-events: auto; touch-action: none;
         background: rgba(255, 255, 255, 0.12); border: 2px solid rgba(255, 255, 255, 0.3);
       }
       #joy-knob {
-        position: absolute; left: 50%; top: 50%; width: 64px; height: 64px; margin: -32px 0 0 -32px;
+        position: absolute; left: 50%; top: 50%; width: 54px; height: 54px; margin: -27px 0 0 -27px;
         border-radius: 50%; background: rgba(255, 255, 255, 0.4);
       }
       #touch-ui button {
-        pointer-events: auto; touch-action: manipulation; color: #fff; font-size: 15px; min-width: 76px; padding: 12px 10px;
-        background: rgba(0, 0, 0, 0.55); border: 1px solid rgba(255, 255, 255, 0.35); border-radius: 10px;
+        pointer-events: auto; touch-action: manipulation; color: #fff; font-size: 22px; line-height: 1; padding: 0;
+        background: rgba(0, 0, 0, 0.5); border: 2px solid rgba(255, 255, 255, 0.4); border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
       }
-      #touch-ui button.on { background: rgba(0, 160, 80, 0.75); }
-      #btn-menu { position: absolute; top: max(12px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right)); }
+      #touch-ui button:active { background: rgba(255, 255, 255, 0.3); }
+      #touch-ui button.on { background: rgba(0, 160, 80, 0.8); }
+      #touch-ui #btn-menu {
+        position: absolute; top: max(12px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right));
+        width: 44px; height: 44px; font-size: 20px;
+      }
+      #touch-ui #btn-view {
+        position: absolute; top: max(12px, env(safe-area-inset-top)); right: calc(max(12px, env(safe-area-inset-right)) + 54px);
+        width: 44px; height: 44px; font-size: 20px;
+      }
+      /* Cụm nút kiểu game MOBA: nút Đánh to ở góc dưới phải, các nút nhỏ xếp vòng cung quanh nó */
       #touch-buttons {
-        position: absolute; right: max(16px, env(safe-area-inset-right)); bottom: max(24px, env(safe-area-inset-bottom));
-        display: flex; flex-direction: column; gap: 10px;
+        position: absolute; right: max(16px, env(safe-area-inset-right)); bottom: max(20px, env(safe-area-inset-bottom));
+        width: 190px; height: 160px;
       }
-      #btn-sit { display: none; background: rgba(160, 100, 0, 0.8); }
-      body.touch #chat { bottom: 190px; width: 50vw; }
+      #touch-buttons button { position: absolute; }
+      #touch-ui #btn-punch { right: 0; bottom: 0; width: 84px; height: 84px; font-size: 38px; background: rgba(170, 30, 30, 0.75); }
+      #touch-ui #btn-sit {
+        display: none; right: 98px; bottom: 2px; width: 62px; height: 62px; font-size: 13px; font-weight: bold;
+        background: rgba(160, 100, 0, 0.85);
+      }
+      #touch-ui #btn-actions { right: 120px; bottom: 74px; width: 50px; height: 50px; }
+      #touch-ui #btn-chat { right: 62px; bottom: 98px; width: 50px; height: 50px; }
+      #touch-ui #btn-mic { right: 0; bottom: 98px; width: 50px; height: 50px; }
+      /* Bảng hành động: một hàng biểu tượng nhỏ nằm phía trên cụm nút */
+      #action-panel {
+        display: none; position: absolute; right: max(16px, env(safe-area-inset-right));
+        bottom: calc(max(20px, env(safe-area-inset-bottom)) + 170px); gap: 6px; pointer-events: auto;
+      }
+      #touch-ui #action-panel button {
+        position: static; width: 54px; height: 54px; border-radius: 12px; flex-direction: column; gap: 2px;
+      }
+      #action-panel .emoji { font-size: 22px; line-height: 1; }
+      #action-panel small { font-size: 9px; opacity: 0.85; }
+      body.touch #chat { bottom: 170px; width: 45vw; }
       body.touch #hud { font-size: 12px; }
 
       /* Màn hình nhỏ: menu cuộn được, ô nhập co theo màn hình */
@@ -96,15 +180,26 @@
       }
       #rotate-overlay .icon { font-size: 64px; display: inline-block; animation: rotate-hint 2s ease-in-out infinite; }
       @keyframes rotate-hint { 0%, 30% { transform: rotate(0); } 70%, 100% { transform: rotate(-90deg); } }
-      @media (pointer: coarse) and (orientation: portrait) {
-        #rotate-overlay { display: flex; }
-      }
       /* Sao quay giữa màn hình khi bị choáng (CSS thuần, rất nhẹ) */
       #btn-punch { background: rgba(170, 30, 30, 0.8); }
       #chat-input { display: none; width: 100%; box-sizing: border-box; margin-top: 6px; padding: 8px; font-size: 14px; pointer-events: auto; }
     </style>
   </head>
   <body>
+    <div id="intro">
+      <div class="logo"><span style="--i:0">N</span><span style="--i:1">g</span><span style="--i:2">h</span><span style="--i:3">i</span><span style="--i:4">a</span><span style="--i:5">-</span><span style="--i:6">C</span><span style="--i:7">i</span><span style="--i:8">n</span><span style="--i:9">e</span><span style="--i:10">m</span><span style="--i:11">a</span><span style="--i:12">-</span><span style="--i:13">K</span><span style="--i:14">T</span><span style="--i:15">V</span></div>
+      <div class="line"></div>
+      <div class="tag">presents</div>
+    </div>
+    <script>
+      // Hết intro (hoặc chạm để bỏ qua) thì gỡ khỏi trang
+      (function () {
+        var el = document.getElementById('intro');
+        var done = function () { if (el.parentNode) el.parentNode.removeChild(el); };
+        el.addEventListener('animationend', function (e) { if (e.animationName === 'intro-out') done(); });
+        el.addEventListener('click', function () { el.style.animation = 'intro-out 0.3s ease forwards'; });
+      })();
+    </script>
     <div id="css-layer"></div>
     <div id="gl-layer"></div>
 
@@ -127,23 +222,25 @@
       <input id="chat-input" type="text" maxlength="200" placeholder="Nhập tin nhắn, Enter để gửi, Esc để huỷ" autocomplete="off" />
     </div>
 
-    <div id="rotate-overlay">
-      <div class="icon">&#128241;</div>
-      <div>Vui lòng xoay ngang điện thoại để vào rạp</div>
-      <small>Nhớ tắt khoá xoay màn hình nếu điện thoại không tự xoay</small>
-    </div>
-
     <div id="sit-prompt"></div>
 
     <div id="touch-ui">
       <div id="look-zone"></div>
       <div id="joy"><div id="joy-knob"></div></div>
-      <button id="btn-menu">Menu</button>
+      <button id="btn-menu" aria-label="Menu">&#9776;</button>
+      <button id="btn-view" aria-label="Đổi góc nhìn">&#128247;</button>
+      <div id="action-panel">
+        <button data-action="clap"><span class="emoji">&#128079;</span><small>Vỗ tay</small></button>
+        <button data-action="confetti"><span class="emoji">&#127881;</span><small>Pháo</small></button>
+        <button data-action="lightstick"><span class="emoji">&#10024;</span><small>Lightstick</small></button>
+        <button data-action="heart"><span class="emoji">&#128150;</span><small>Tim</small></button>
+      </div>
       <div id="touch-buttons">
-        <button id="btn-punch">Đánh</button>
+        <button id="btn-actions" aria-label="Hành động">&#127881;</button>
+        <button id="btn-punch" aria-label="Đánh">&#128074;</button>
         <button id="btn-sit">Ngồi</button>
-        <button id="btn-chat">Chat</button>
-        <button id="btn-mic">Mic tắt</button>
+        <button id="btn-chat" aria-label="Chat">&#128172;</button>
+        <button id="btn-mic" aria-label="Mic">&#128263;</button>
       </div>
     </div>
 
@@ -152,13 +249,24 @@
       <button id="mic">Bật/tắt mic</button>
       <div class="row">
         <input id="url" type="text" placeholder="Dán link YouTube..." />
-        <button id="load">Chiếu</button>
+        <button id="load" class="vbtn" title="Chiếu video này" aria-label="Chiếu video này">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4.5" width="18" height="12.5" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M10 8l5 2.75L10 13.5z" fill="currentColor"/><path d="M8 20.5h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
       </div>
-      <div class="row">
-        <button id="play">Phát</button>
-        <button id="pause">Tạm dừng</button>
-        <button id="back">-10s</button>
-        <button id="forward">+10s</button>
+      <!-- Điều khiển video: chỉ có biểu tượng; số bên cạnh là lượng tua. Một nút duy nhất cho phát/tạm dừng. -->
+      <div class="video-controls">
+        <button class="vbtn seek" data-seek="-1800" title="Tua lùi 30 phút" aria-label="Tua lùi 30 phút"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6L5 12l7 6zM20 6l-7 6 7 6z" fill="currentColor"/></svg><span>30m</span></button>
+        <button class="vbtn seek" data-seek="-300" title="Tua lùi 5 phút" aria-label="Tua lùi 5 phút"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6L5 12l7 6zM20 6l-7 6 7 6z" fill="currentColor"/></svg><span>5m</span></button>
+        <button class="vbtn seek" data-seek="-30" title="Tua lùi 30 giây" aria-label="Tua lùi 30 giây"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6L5 12l7 6zM20 6l-7 6 7 6z" fill="currentColor"/></svg><span>30s</span></button>
+        <button class="vbtn seek" data-seek="-10" title="Tua lùi 10 giây" aria-label="Tua lùi 10 giây"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-7 6 7 6z" fill="currentColor"/></svg><span>10s</span></button>
+        <button id="playpause" class="vbtn" title="Phát" aria-label="Phát">
+          <svg class="icon-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5l11 7-11 7z" fill="currentColor"/></svg>
+          <svg class="icon-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zM13 5h4v14h-4z" fill="currentColor"/></svg>
+        </button>
+        <button class="vbtn seek" data-seek="10" title="Tua tới 10 giây" aria-label="Tua tới 10 giây"><span>10s</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l7 6-7 6z" fill="currentColor"/></svg></button>
+        <button class="vbtn seek" data-seek="30" title="Tua tới 30 giây" aria-label="Tua tới 30 giây"><span>30s</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6l7 6-7 6zM12 6l7 6-7 6z" fill="currentColor"/></svg></button>
+        <button class="vbtn seek" data-seek="300" title="Tua tới 5 phút" aria-label="Tua tới 5 phút"><span>5m</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6l7 6-7 6zM12 6l7 6-7 6z" fill="currentColor"/></svg></button>
+        <button class="vbtn seek" data-seek="1800" title="Tua tới 30 phút" aria-label="Tua tới 30 phút"><span>30m</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6l7 6-7 6zM12 6l7 6-7 6z" fill="currentColor"/></svg></button>
       </div>
       <div class="row">
         <label for="quality">Chất lượng đồ hoạ</label>
@@ -183,7 +291,7 @@
         <label><input type="checkbox" id="show-fps" checked /> Hiện FPS</label>
       </div>
       <div id="msg"></div>
-      <small id="hint">WASD để đi, chuột để nhìn, M để bật/tắt mic, E để ngồi/đứng/hát (gần ghế hoặc sân khấu), chuột trái hoặc F để đánh, Enter để chat, Esc để mở menu này</small>
+      <small id="hint">WASD để đi, chuột để nhìn, M để bật/tắt mic, E để ngồi/đứng/hát (gần ghế hoặc sân khấu), chuột trái hoặc F để đánh, phím 1 vỗ tay · 2 pháo giấy · 3 lightstick · 4 trái tim, Enter để chat, Esc để mở menu này</small>
     </div>
     <script type="module" src="/src/main.js"></script>
   </body>

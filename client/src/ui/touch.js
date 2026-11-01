@@ -1,10 +1,12 @@
 // Điều khiển cảm ứng cho điện thoại: cần gạt bên trái để đi, kéo phía bên phải để nhìn, vài nút chức năng.
 // DOM nằm sẵn trong index.html (#touch-ui); module này chỉ gắn sự kiện.
 
+import { mapDelta } from './viewport.js';
+
 const JOY_RADIUS = 55; // px: quãng kéo cần gạt tối đa
 
 // onLook(dx, dy): độ dịch ngón tay (px) khi kéo nhìn quanh
-export function createTouchControls({ onLook, onMenu, onMic, onChat, onSit, onPunch }) {
+export function createTouchControls({ onLook, onMenu, onMic, onChat, onSit, onPunch, onAction, onView }) {
   const $ = (id) => document.getElementById(id);
   const root = $('touch-ui');
   const joy = $('joy');
@@ -20,8 +22,9 @@ export function createTouchControls({ onLook, onMenu, onMic, onChat, onSit, onPu
   let joyCenter = null;
 
   function updateJoy(touch) {
-    let dx = touch.clientX - joyCenter.x;
-    let dy = touch.clientY - joyCenter.y;
+    const d = mapDelta(touch.clientX - joyCenter.x, touch.clientY - joyCenter.y);
+    let dx = d.x;
+    let dy = d.y;
     const dist = Math.hypot(dx, dy);
     if (dist > JOY_RADIUS) {
       dx = (dx / dist) * JOY_RADIUS;
@@ -88,7 +91,8 @@ export function createTouchControls({ onLook, onMenu, onMic, onChat, onSit, onPu
       e.preventDefault();
       const t = findTouch(e, lookId);
       if (!t) return;
-      onLook(t.clientX - lastLook.x, t.clientY - lastLook.y);
+      const d = mapDelta(t.clientX - lastLook.x, t.clientY - lastLook.y);
+      onLook(d.x, d.y);
       lastLook = { x: t.clientX, y: t.clientY };
     },
     { passive: false }
@@ -104,12 +108,29 @@ export function createTouchControls({ onLook, onMenu, onMic, onChat, onSit, onPu
   $('btn-chat').addEventListener('click', onChat);
   btnSit.addEventListener('click', onSit);
   $('btn-punch').addEventListener('click', onPunch);
+  $('btn-view').addEventListener('click', onView);
+
+  // Nút "Hành động" mở một hàng biểu tượng nhỏ; chọn xong thì đóng lại. Chạm ra ngoài cũng đóng.
+  const panel = $('action-panel');
+  $('btn-actions').addEventListener('click', () => {
+    panel.style.display = panel.style.display === 'flex' ? 'none' : 'flex';
+  });
+  panel.querySelectorAll('[data-action]').forEach((b) =>
+    b.addEventListener('click', () => {
+      onAction(b.dataset.action);
+      panel.style.display = 'none';
+    })
+  );
+  lookZone.addEventListener('touchstart', () => (panel.style.display = 'none'));
 
   return {
     move,
     setVisible(visible) {
       root.style.display = visible ? 'block' : 'none';
-      if (!visible) resetJoy();
+      if (!visible) {
+        resetJoy();
+        panel.style.display = 'none';
+      }
     },
     setJoyVisible(visible) {
       joy.style.display = visible ? 'block' : 'none';
@@ -117,12 +138,12 @@ export function createTouchControls({ onLook, onMenu, onMic, onChat, onSit, onPu
     },
     // label = chữ trên nút; null thì ẩn nút (không có ghế gần / không đang ngồi)
     setSitButton(label) {
-      btnSit.style.display = label ? 'block' : 'none';
+      btnSit.style.display = label ? 'flex' : 'none';
       if (label) btnSit.textContent = label;
     },
     setMicOn(on) {
       btnMic.classList.toggle('on', on);
-      btnMic.textContent = on ? 'Mic BẬT' : 'Mic tắt';
+      btnMic.textContent = on ? '\u{1F3A4}' : '\u{1F507}'; // mic đang bật / mic đang tắt
     },
   };
 }

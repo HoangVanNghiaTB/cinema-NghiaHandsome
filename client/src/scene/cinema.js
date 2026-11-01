@@ -100,6 +100,62 @@ for (let i = 0; i < ROWS; i++) {
   for (const x of SEAT_XS) SEATS.push({ x, y: floorY + CUSHION_HEIGHT, z: z - 0.02, floorY });
 }
 
+// Vật thể không cho đi xuyên qua, nhìn từ trên xuống (chỉ x, z). Hình chữ nhật: ghế, thùng loa; hình tròn: cột mic, chân màn hình karaoke.
+// Kích thước lấy theo các hình dựng trong buildCinema (nhớ sửa cả hai nếu đổi). Bậc thang và sân khấu thì đi lên được nên không có ở đây.
+const rectAt = (cx, cz, hx, hz) => ({ minX: cx - hx, maxX: cx + hx, minZ: cz - hz, maxZ: cz + hz });
+const RECT_COLLIDERS = [];
+const CIRCLE_COLLIDERS = [];
+// Rộng ±0.5 (ghế cách nhau 1 m, tay vịn ±0.43) để các ghế liền nhau thành một dãy kín, không lách qua khe giữa hai ghế được
+for (const s of SEATS) RECT_COLLIDERS.push(rectAt(s.x, s.z + 0.04, 0.5, 0.37));
+for (const s of STAGES) {
+  for (const side of [-1, 1]) {
+    RECT_COLLIDERS.push(rectAt(s.x + side * (s.w / 2 - 0.3), s.z + s.d / 2 - 0.35 + 0.05, 0.3, 0.3)); // thùng loa kèm mặt loa
+  }
+  CIRCLE_COLLIDERS.push({ x: s.micX, z: s.micZ, r: 0.15 });
+  CIRCLE_COLLIDERS.push({ x: s.monitor.x, z: s.monitor.z + 0.06, r: 0.22 });
+}
+
+// Đẩy người chơi (hình tròn bán kính `radius` trên mặt sàn) ra khỏi các vật thể; trả về vị trí mới.
+// Đẩy theo hướng gần nhất nên đi chéo vào vật sẽ trượt dọc theo vật chứ không bị kẹt.
+export function resolveCollisions(x, z, radius) {
+  for (let pass = 0; pass < 2; pass++) {
+    for (const r of RECT_COLLIDERS) {
+      const nx = Math.min(Math.max(x, r.minX), r.maxX);
+      const nz = Math.min(Math.max(z, r.minZ), r.maxZ);
+      const dx = x - nx;
+      const dz = z - nz;
+      const d = Math.hypot(dx, dz);
+      if (d >= radius) continue;
+      if (d > 1e-6) {
+        x = nx + (dx / d) * radius;
+        z = nz + (dz / d) * radius;
+      } else {
+        // tâm đã nằm trong hình chữ nhật: đẩy ra qua cạnh gần nhất
+        const left = x - r.minX, right = r.maxX - x, back = z - r.minZ, front = r.maxZ - z;
+        const m = Math.min(left, right, back, front);
+        if (m === left) x = r.minX - radius;
+        else if (m === right) x = r.maxX + radius;
+        else if (m === back) z = r.minZ - radius;
+        else z = r.maxZ + radius;
+      }
+    }
+    for (const c of CIRCLE_COLLIDERS) {
+      const dx = x - c.x;
+      const dz = z - c.z;
+      const d = Math.hypot(dx, dz);
+      const min = c.r + radius;
+      if (d >= min) continue;
+      if (d > 1e-6) {
+        x = c.x + (dx / d) * min;
+        z = c.z + (dz / d) * min;
+      } else {
+        x = c.x + min;
+      }
+    }
+  }
+  return { x, z };
+}
+
 export function buildCinema(scene, { lowQuality = false } = {}) {
   // Lambert rẻ hơn PBR nhiều khi có nhiều đèn, mà nhìn gần như nhau với bề mặt nhám
   const darkWall = new THREE.MeshLambertMaterial({ color: 0x15151a }); // trần

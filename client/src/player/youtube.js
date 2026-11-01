@@ -51,12 +51,25 @@ const ERROR_MESSAGES = {
 export async function createYouTubePlayer(el, { width = 1280, height = 720, onStateChange, onError } = {}) {
   await loadApi();
   return new Promise((resolve) => {
+    // Tắt phụ đề, kể cả phụ đề tự động mà YouTube tự bật theo cài đặt tài khoản của người xem. cc_load_policy=0 chỉ là
+    // "theo mặc định của người xem", nên ta còn gỡ hẳn mô-đun phụ đề (unloadModule) mỗi khi nó nạp/lúc video bắt đầu phát.
+    // unloadModule không nằm trong tài liệu chính thức của YouTube nên không đảm bảo mãi mãi.
+    const hideCaptions = () => {
+      try {
+        player.unloadModule('captions');
+        player.unloadModule('cc');
+      } catch {
+        // trình phát chưa sẵn sàng thì lần sau
+      }
+    };
     const player = new window.YT.Player(el, {
       width,
       height,
-      playerVars: { controls: 0, disablekb: 1, rel: 0, playsinline: 1, modestbranding: 1 },
+      playerVars: { controls: 0, disablekb: 1, rel: 0, playsinline: 1, modestbranding: 1, cc_load_policy: 0, iv_load_policy: 3 },
       events: {
-        onReady: () =>
+        onApiChange: hideCaptions, // YouTube báo mỗi khi có mô-đun mới (như phụ đề) được nạp
+        onReady: () => {
+          hideCaptions();
           resolve({
             load: (videoId, startSeconds = 0) => player.loadVideoById(videoId, startSeconds),
             cue: (videoId, startSeconds = 0) => player.cueVideoById(videoId, startSeconds), // nạp nhưng không phát
@@ -68,8 +81,12 @@ export async function createYouTubePlayer(el, { width = 1280, height = 720, onSt
             seek: (seconds) => player.seekTo(seconds, true),
             getTime: () => player.getCurrentTime(),
             getState: () => player.getPlayerState(), // 1 = đang phát, 2 = tạm dừng
-          }),
-        onStateChange: (e) => onStateChange && onStateChange(e.data),
+          });
+        },
+        onStateChange: (e) => {
+          if (e.data === 1 || e.data === 3) hideCaptions(); // bắt đầu phát/đệm: lúc phụ đề hay tự bật
+          if (onStateChange) onStateChange(e.data);
+        },
         onError: (e) => onError && onError(ERROR_MESSAGES[e.data] || 'Không phát được video.'),
       },
     });

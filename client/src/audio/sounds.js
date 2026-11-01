@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 
 // Âm thanh trong rạp, dùng các file có sẵn trong dự án (client/public/sounds). Mỗi file chứa nhiều tiếng;
-// ta cắt từng tiếng ra (theo các mốc `onsets`, tìm bằng cách phân tích biên độ) và phát ngẫu nhiên một tiếng mỗi lần.
-// Âm thanh có vị trí: càng xa người nghe càng nhỏ, và lệch trái/phải theo hướng nguồn âm.
+// ta cắt từng tiếng/đoạn ra (theo các mốc `onsets`, tìm bằng cách phân tích biên độ) và phát ngẫu nhiên một cái mỗi lần.
+// Mặc định âm thanh có vị trí: càng xa người nghe càng nhỏ, và lệch trái/phải theo hướng nguồn âm.
+// Loại `global: true` thì cả phòng nghe như nhau, không theo khoảng cách (vd. vỗ tay).
 //
 // maxGain là phần của mức tối đa (YouTube ở 100% là mức 1) mà tiếng to nhất có thể đạt, ở sát người nghe.
 const SOUNDS = {
@@ -28,6 +29,20 @@ const SOUNDS = {
     maxGain: 1 / 2,
     maxDistance: 18, // cả phòng đều nghe được, xa thì nhỏ
   },
+  // Tiếng vỗ tay của khán giả (file dài ~7.7 giây, mạnh nhất ở 5 giây đầu): cắt một đoạn 3 giây khớp với lúc
+  // avatar vỗ tay. Cả phòng nghe như nhau (không theo gần xa) nhưng nhỏ, đủ nghe mà không gây khó chịu.
+  clap: {
+    url: '/sounds/clap.mp3',
+    onsets: [0.3, 1.2, 2.2], // ba điểm bắt đầu khác nhau cho đỡ lặp
+    preRoll: 0,
+    duration: 3,
+    fadeIn: 0.15,
+    fadeOut: 0.6,
+    rateJitter: 0.04,
+    maxGain: 0.04,
+    global: true,
+    maxVoices: 2, // nhiều người vỗ tay cùng lúc thì chỉ chồng tối đa 2 tiếng, không thì thành tiếng ồn
+  },
 };
 
 const MIN_AUDIBLE_GAIN = 0.0015;
@@ -38,6 +53,7 @@ export function createSounds(listener) {
   let ctx = null;
   const buffers = {}; // tên âm thanh -> AudioBuffer (có sau khi tải xong)
   const lastPlayed = {}; // tên âm thanh -> chỉ số tiếng vừa phát, để không lặp liền nhau
+  const voices = {}; // tên âm thanh -> số tiếng đang phát (để giới hạn maxVoices)
   let master = 1; // hệ số âm lượng chung do người dùng chỉnh (thanh "Hiệu ứng" trong menu)
   const right = new THREE.Vector3();
 
@@ -50,25 +66,30 @@ export function createSounds(listener) {
     }
   }
 
+  // x, z: vị trí nguồn âm (bỏ qua với âm thanh global)
   function playAt(name, x, z) {
     const sound = SOUNDS[name];
     const buffer = buffers[name];
     if (!ctx || !buffer || ctx.state !== 'running') return;
 
-    const dx = x - listener.position.x;
-    const dz = z - listener.position.z;
-    const dist = Math.hypot(dx, dz);
-    if (dist >= sound.maxDistance) return;
-    const falloff = 1 - dist / sound.maxDistance;
-    const gain = sound.maxGain * falloff * falloff * master; // giảm nhanh theo khoảng cách
-    if (gain < MIN_AUDIBLE_GAIN) return;
-
-    // -1 = hoàn toàn bên trái, +1 = bên phải (theo hướng camera đang nhìn)
-    let pan = 0;
-    if (dist > 0.5) {
-      right.set(1, 0, 0).applyQuaternion(listener.quaternion);
-      pan = THREE.MathUtils.clamp((right.x * dx + right.z * dz) / dist, -1, 1) * 0.8;
+    let gain;
+    let pan = 0; // -1 = hoàn toàn bên trái, +1 = bên phải (theo hướng camera đang nhìn)
+    if (sound.global) {
+      if ((voices[name] ?? 0) >= (sound.maxVoices ?? Infinity)) return;
+      gain = sound.maxGain * master;
+    } else {
+      const dx = x - listener.position.x;
+      const dz = z - listener.position.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist >= sound.maxDistance) return;
+      const falloff = 1 - dist / sound.maxDistance;
+      gain = sound.maxGain * falloff * falloff * master; // giảm nhanh theo khoảng cách
+      if (dist > 0.5) {
+        right.set(1, 0, 0).applyQuaternion(listener.quaternion);
+        pan = THREE.MathUtils.clamp((right.x * dx + right.z * dz) / dist, -1, 1) * 0.8;
+      }
     }
+    if (gain < MIN_AUDIBLE_GAIN) return;
 
     // chọn ngẫu nhiên một tiếng, không trùng tiếng vừa rồi
     let index;
@@ -83,12 +104,14 @@ export function createSounds(listener) {
     src.playbackRate.value = 1 + (Math.random() - 0.5) * sound.rateJitter;
     const env = ctx.createGain();
     env.gain.setValueAtTime(0, t);
-    env.gain.linearRampToValueAtTime(gain, t + 0.004);
+    env.gain.linearRampToValueAtTime(gain, t + (sound.fadeIn ?? 0.004));
     env.gain.setValueAtTime(gain, t + sound.duration - sound.fadeOut);
     env.gain.linearRampToValueAtTime(0, t + sound.duration);
     const panner = ctx.createStereoPanner();
     panner.pan.value = pan;
     src.connect(env).connect(panner).connect(ctx.destination);
+    voices[name] = (voices[name] ?? 0) + 1;
+    src.onended = () => (voices[name] -= 1);
     src.start(t, offset, sound.duration);
   }
 
@@ -107,5 +130,6 @@ export function createSounds(listener) {
     },
     playStepAt: (x, z) => playAt('step', x, z),
     playSlapAt: (x, z) => playAt('slap', x, z),
+    playClap: () => playAt('clap'), // cả phòng nghe như nhau
   };
 }

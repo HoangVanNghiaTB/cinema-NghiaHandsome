@@ -6,7 +6,8 @@ const SERVER_URL = import.meta.env.DEV ? `http://${location.hostname}:3000` : un
 // handlers: { onInit(id, players, video, iceServers), onJoin(player), onMove(data), onLeave(id), onFull(),
 //             onStatus(connected), onVideo({ videoId, playing, position }), onSignal(from, data),
 //             onChat({ id, name, text }), onSeat({ id, seat }), onSeatDenied(),
-//             onStun({ id, by, duration }), onStage({ id, stage }), onStageDenied() }
+//             onStun({ id, by, duration }), onStage({ id, stage }), onStageDenied(),
+//             onEmote({ id, type, on? }), onSwing({ id }) }
 export function connectToRoom({ name, color }, handlers) {
   const socket = io(SERVER_URL);
 
@@ -20,6 +21,8 @@ export function connectToRoom({ name, color }, handlers) {
   socket.on('signal', ({ from, data }) => handlers.onSignal?.(from, data));
   socket.on('chat', (m) => handlers.onChat?.(m));
   socket.on('stun', (d) => handlers.onStun?.(d));
+  socket.on('emote', (d) => handlers.onEmote?.(d));
+  socket.on('swing', (d) => handlers.onSwing?.(d));
   socket.on('stage-update', (d) => handlers.onStage?.(d));
   socket.on('stage-denied', () => handlers.onStageDenied?.());
   socket.on('seat-update', (d) => handlers.onSeat?.(d));
@@ -32,6 +35,7 @@ export function connectToRoom({ name, color }, handlers) {
   return {
     sendMove: (state) => socket.volatile.emit('move', state),
     punch: () => socket.emit('punch'),
+    emote: (type) => socket.emit('emote', { type }),
     sing: (stage) => socket.emit('sing', { stage }),
     stopSing: () => socket.emit('stop-sing'),
     sit: (seat) => socket.emit('sit', { seat }),

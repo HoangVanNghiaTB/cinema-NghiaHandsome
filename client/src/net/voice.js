@@ -22,7 +22,7 @@ const MIN_DETECT_GAIN = 0.04; // người nói gửi quá nhỏ (xa) thì không
 //     (senderMode 'gain': họ đã hạ âm lượng rồi nên chỉ còn phần mình chỉnh; 'raw': mình phải tự hạ gần/xa)
 // getSendVolume(id) -> 0..1: âm lượng giọng MÌNH gửi cho người đó (gần/xa, hoặc đang hát)
 // getExpectedGain(id) -> 0..1: âm lượng người đó đang gửi cho mình theo cùng quy tắc (để đo "đang nói" cho đúng)
-export function createVoice({ sendSignal, onSpeaking, getVolume, getSendVolume, getExpectedGain }) {
+export function createVoice({ sendSignal, onSpeaking, onSelfSpeaking, getVolume, getSendVolume, getExpectedGain }) {
   let selfId = null;
   let started = false;
   let starting = null;
@@ -272,8 +272,23 @@ export function createVoice({ sendSignal, onSpeaking, getVolume, getSendVolume, 
 
   // Mỗi 0.1 giây: cập nhật âm lượng gần/xa (gửi và nghe), và phát hiện ai đang nói bằng mức tín hiệu (RMS)
   const buf = new Uint8Array(128);
+  let localAnalyser = null; // đo mức mic của chính mình (để avatar mình nhép miệng)
+  let localLastLoud = 0;
+  let localSpeaking = false;
   setInterval(() => {
     const now = performance.now();
+    if (localAnalyser) {
+      // mic đang tắt thì track bị vô hiệu hoá, tín hiệu là im lặng nên không cần kiểm tra riêng
+      localAnalyser.getByteTimeDomainData(buf);
+      let sum = 0;
+      for (const v of buf) sum += ((v - 128) / 128) ** 2;
+      if (Math.sqrt(sum / buf.length) > SPEAK_THRESHOLD) localLastLoud = now;
+      const speaking = now - localLastLoud < SPEAK_HOLD_MS;
+      if (speaking !== localSpeaking) {
+        localSpeaking = speaking;
+        onSelfSpeaking?.(speaking);
+      }
+    }
     for (const [id, peer] of peers) {
       const mode = remoteModes.get(id) ?? 'raw';
       if (getVolume) applyVolume(peer, getVolume(id, mode));
@@ -335,6 +350,13 @@ export function createVoice({ sendSignal, onSpeaking, getVolume, getSendVolume, 
             audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
           });
           localStream.getAudioTracks().forEach((t) => (t.enabled = false)); // mặc định tắt tiếng
+          try {
+            localAnalyser = audioCtx.createAnalyser();
+            localAnalyser.fftSize = 256;
+            audioCtx.createMediaStreamSource(localStream).connect(localAnalyser); // chỉ để đo, không nối ra loa
+          } catch (err) {
+            console.warn('Voice: không đo được mức mic của mình', err);
+          }
         } catch (err) {
           console.warn('Voice: không dùng được mic, chuyển sang chỉ nghe', err);
           mode = 'listen-only';

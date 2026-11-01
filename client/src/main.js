@@ -1,9 +1,12 @@
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls.js';
 import { CSS3DRenderer, CSS3DObject } from 'three/examples/jsm/renderers/CSS3DRenderer.js';
-import { buildCinema, floorHeight, ROOM, SCREEN, SEATS, STAGES } from './scene/cinema.js';
+import { buildCinema, floorHeight, resolveCollisions, ROOM, SCREEN, SEATS, STAGES } from './scene/cinema.js';
 import { createTouchControls } from './ui/touch.js';
+import { viewW, viewH } from './ui/viewport.js';
 import { StunRing } from './scene/stunRing.js';
+import { Confetti } from './scene/confetti.js';
+import { FirstPersonHand } from './scene/fpHand.js';
 import { createSounds, STEP_LENGTH } from './audio/sounds.js';
 import { createYouTubePlayer, parseVideoId } from './player/youtube.js';
 import { Avatars } from './scene/avatars.js';
@@ -16,7 +19,7 @@ const scene = new THREE.Scene(); // không đặt background để lớp CSS3D p
 const isTouch = matchMedia('(pointer: coarse)').matches;
 if (isTouch) document.body.classList.add('touch');
 
-const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 100);
+const camera = new THREE.PerspectiveCamera(70, viewW() / viewH(), 0.1, 100);
 camera.position.set(0, 1.6, -4);
 camera.rotation.order = 'YXZ'; // rotation.y là góc quay ngang thật sự, kể cả khi ngước/cúi
 scene.add(camera); // để các vật gắn vào camera (vòng sao choáng) được vẽ
@@ -56,13 +59,13 @@ const renderer = new THREE.WebGLRenderer({
   powerPreference: 'high-performance', // máy có 2 card: ưu tiên card rời
 });
 renderer.setClearColor(0x000000, 0);
-renderer.setSize(innerWidth, innerHeight);
+renderer.setSize(viewW(), viewH());
 renderer.setPixelRatio(START_PIXEL_RATIO); // về sau tự hạ thêm nếu FPS thấp
 document.getElementById('gl-layer').appendChild(renderer.domElement);
 
 // Lớp CSS3D (phía dưới, chứa iframe YouTube)
 const cssRenderer = new CSS3DRenderer();
-cssRenderer.setSize(innerWidth, innerHeight);
+cssRenderer.setSize(viewW(), viewH());
 document.getElementById('css-layer').appendChild(cssRenderer.domElement);
 const cssScene = new THREE.Scene();
 
@@ -71,6 +74,8 @@ const NO_CSS = new URLSearchParams(location.search).has('nocss');
 if (NO_CSS) document.getElementById('css-layer').style.display = 'none';
 
 const cinema = buildCinema(scene, { lowQuality });
+const confetti = new Confetti(scene, { perBurst: lowQuality ? 24 : 40 }); // ít hạt hơn ở chế độ nhẹ
+const fpHand = new FirstPersonHand(camera); // bàn tay của mình khi tát
 
 // Màn hình video: div thu nhỏ cho khớp màn hình 3D. Chế độ thấp dùng 480p để YouTube
 // gửi video nhẹ hơn (giải mã video bằng CPU rất tốn trên máy không có tăng tốc phần cứng)
@@ -218,6 +223,7 @@ function applyDesired(tolerance = EXPLICIT_TOLERANCE) {
 function setDesired(video) {
   if (!video) return;
   desired = { ...video, receivedAt: performance.now() };
+  updatePlayPauseButton();
   applyDesired();
 }
 
@@ -233,13 +239,53 @@ $('load').addEventListener('click', () => {
   msg.textContent = '';
   room.loadVideo(id);
 });
-const currentTime = () => (player ? player.getTime() : 0);
-$('play').addEventListener('click', () => room.playVideo(currentTime()));
-$('pause').addEventListener('click', () => room.pauseVideo(currentTime()));
-$('back').addEventListener('click', () => room.seekVideo(Math.max(0, currentTime() - 10)));
-$('forward').addEventListener('click', () => room.seekVideo(currentTime() + 10));
+// Vị trí video hiện tại: ưu tiên theo trạng thái chung của phòng (khớp với mọi người), không có thì lấy từ trình phát
+const videoPosition = () => (desired?.videoId ? expectedPosition() : player ? player.getTime() : 0);
+
+// Một nút duy nhất cho phát/tạm dừng: đang phát thì bấm sẽ dừng, đang dừng thì bấm sẽ phát
+const playPauseBtn = $('playpause');
+playPauseBtn.addEventListener('click', () => {
+  if (!room || !desired?.videoId) return;
+  if (desired.playing) room.pauseVideo(videoPosition());
+  else room.playVideo(videoPosition());
+});
+function updatePlayPauseButton() {
+  const playing = !!desired?.playing;
+  playPauseBtn.classList.toggle('is-playing', playing); // hiện biểu tượng tạm dừng khi đang phát, ngược lại hiện biểu tượng phát
+  const label = playing ? 'Tạm dừng' : 'Phát';
+  playPauseBtn.title = label;
+  playPauseBtn.setAttribute('aria-label', label);
+}
+
+// Các nút tua: data-seek là số giây tua (âm = lùi). Tua tới trước 0 thì về 0; quá cuối video thì YouTube tự dừng ở cuối.
+document.querySelectorAll('[data-seek]').forEach((button) => {
+  button.addEventListener('click', () => {
+    if (!room || !desired?.videoId) return;
+    room.seekVideo(Math.max(0, videoPosition() + Number(button.dataset.seek)));
+  });
+});
 
 const avatars = new Avatars(scene, { onStep: (x, z) => sounds.playStepAt(x, z) });
+// Avatar của chính mình, chỉ hiện ở góc nhìn thứ 3 (không tiếng bước chân vì tiếng của mình đã phát riêng)
+const selfAvatar = new Avatars(scene);
+const SELF = 'me';
+// Góc nhìn thứ 3 chỉ dùng khi đang đứng; ngồi hoặc hát thì tự về góc nhìn thứ nhất (lựa chọn vẫn được nhớ)
+let thirdPersonPref = false;
+const isThirdPerson = () => thirdPersonPref && mySeat === null && myStage === null;
+const THIRD_DISTANCE = 2.8;
+const THIRD_PIVOT_DROP = 0.1; // m: tâm xoay thấp hơn mắt một chút (ngang đầu/cổ nhân vật)
+const thirdDir = new THREE.Vector3();
+// Thân mình nhìn từ mắt: gầy đi (bán kính 0.3 -> ~0.2) và lùi ra sau mắt một chút (nhỏ hơn bán kính mới, nhưng đủ
+// xa để mặt trên của thân nằm dưới mắt hơn 0.1 m, tránh bị cắt bởi mặt phẳng gần của camera)
+const FIRST_PERSON_BODY_WIDTH = 0.65;
+const FIRST_PERSON_BODY_SETBACK = 0.18; // m
+
+function toggleView() {
+  thirdPersonPref = !thirdPersonPref;
+  if (mySeat !== null || myStage !== null) {
+    addChatLine('Góc nhìn thứ 3 chỉ dùng khi đứng; sẽ áp dụng khi bạn đứng dậy.', { system: true });
+  }
+}
 let myId = null;
 const names = new Map(); // id -> tên, để báo ai vào/rời phòng
 
@@ -263,6 +309,7 @@ function updateHud() {
 const voice = createVoice({
   sendSignal: (to, data) => room.sendSignal(to, data),
   onSpeaking: (id, speaking) => avatars.setSpeaking(id, speaking),
+  onSelfSpeaking: (speaking) => selfAvatar.setSpeaking(SELF, speaking),
   getVolume: (id, senderMode) => listenVoiceVolume(id, senderMode),
   getSendVolume: (id) => sendVoiceVolume(id), // người nói tự hạ âm lượng gần/xa cho từng người nghe
   getExpectedGain: (id) => expectedVoiceGain(id),
@@ -333,6 +380,8 @@ let room = null;
 const setNetStatus = (text) => ($('net').textContent = text);
 
 function joinRoom(profile) {
+  selfAvatar.remove(SELF);
+  selfAvatar.add({ id: SELF, name: profile.name, color: profile.color });
   room = connectToRoom(profile, {
     onInit: (id, others, video, iceServers) => {
       myId = id;
@@ -404,6 +453,31 @@ function joinRoom(profile) {
     },
     onStageDenied: () => addChatLine('Sân khấu này đã có người hát.', { system: true }),
     onStun: ({ id, duration }) => startStun(id, duration),
+    onEmote: ({ id, type, on }) => {
+      if (type === 'lightstick') {
+        if (id === myId) selfAvatar.setHolding(SELF, !!on);
+        else avatars.setHolding(id, !!on);
+        return;
+      }
+      if (id === myId) selfAvatar.playAction(SELF, type);
+      else avatars.playAction(id, type);
+      if (type === 'clap') sounds.playClap(); // cả phòng nghe như nhau, gồm cả người vỗ
+      if (type === 'confetti') {
+        // bắn từ ngực người bắn lên trên đầu
+        const a = avatars.items.get(id);
+        if (id === myId) confetti.burst(camera.position.x, camera.position.y - 0.6, camera.position.z);
+        else if (a) confetti.burst(a.group.position.x, a.group.position.y + (a.seated ? 0.65 : 1.0), a.group.position.z);
+      }
+    },
+    // Ai tát (trúng hay hụt) thì hiện tay vung ra: tay của chính mình nhìn từ mắt mình, hoặc tay avatar của người khác
+    onSwing: ({ id }) => {
+      if (id === myId) {
+        fpHand.swing();
+        selfAvatar.swing(SELF);
+      } else {
+        avatars.swing(id);
+      }
+    },
     onLeave: (id) => {
       clearTimeout(stunTimers.get(id));
       stunTimers.delete(id);
@@ -681,6 +755,14 @@ const stunTimers = new Map(); // id người khác -> hẹn giờ hết choáng
 const isStunned = () => performance.now() < stunUntil;
 
 function startStun(id, duration) {
+  // bị choáng thì dừng mọi hành động đang diễn (vỗ tay, tát...)
+  if (id === myId) {
+    fpHand.cancel();
+    selfAvatar.cancelActions(SELF);
+  } else {
+    avatars.cancelActions(id);
+  }
+
   // Server báo đòn đã trúng: cả phòng nghe tiếng tát tại chỗ người bị đánh (xa thì nhỏ)
   const victim = id === myId ? camera.position : avatars.items.get(id)?.group.position;
   if (victim) sounds.playSlapAt(victim.x, victim.z);
@@ -688,9 +770,11 @@ function startStun(id, duration) {
   if (id === myId) {
     stunUntil = performance.now() + duration;
     stunRing.show();
+    selfAvatar.setStunned(SELF, true); // thấy sao trên đầu mình ở góc nhìn thứ 3
     controls.pointerSpeed = 0; // chuột không xoay được nữa
     setTimeout(() => {
       if (isStunned()) return;
+      selfAvatar.setStunned(SELF, false);
       stunRing.hide();
       controls.pointerSpeed = 1;
     }, duration + 20);
@@ -720,6 +804,13 @@ function applyShake(nowMs) {
   savedQuat.copy(camera.quaternion);
   shakeEuler.set(a * Math.sin(t * 37), a * Math.sin(t * 29 + 1), a * 0.7 * Math.sin(t * 23 + 2));
   camera.quaternion.multiply(shakeQuat.setFromEuler(shakeEuler));
+}
+
+// Hành động: phím số 1-4 (điện thoại: nút Hành động). Server kiểm tra thời gian chờ và quyết định có làm không.
+const EMOTE_KEYS = { Digit1: 'clap', Digit2: 'confetti', Digit3: 'lightstick', Digit4: 'heart' };
+function doEmote(type) {
+  if (!room || !myId || isStunned()) return;
+  room.emote(type);
 }
 
 function punch() {
@@ -760,6 +851,8 @@ const touch = isTouch
       onChat: () => startChat(),
       onSit: interact,
       onPunch: punch,
+      onView: toggleView,
+      onAction: doEmote,
     })
   : null;
 
@@ -784,13 +877,10 @@ $('enter').addEventListener('click', () => {
   sounds.unlock(); // trình duyệt chỉ cho phát âm thanh sau một thao tác bấm
   if (isTouch) {
     setActive(true);
-    // Toàn màn hình cho rộng chỗ, rồi khoá ngang (Android Chrome cho khoá khi đang toàn màn hình; iPhone thì không,
-    // nên vẫn có màn hình nhắc xoay ngang ở index.html)
+    // Toàn màn hình cho rộng chỗ. Không khoá hướng màn hình: trang tự xoay ngang bằng CSS (xem index.html),
+    // khoá hướng thật sẽ xung đột với việc đó
     try {
-      document.documentElement
-        .requestFullscreen?.()
-        ?.then(() => screen.orientation?.lock?.('landscape'))
-        .catch(() => {});
+      document.documentElement.requestFullscreen?.()?.catch(() => {});
     } catch {
       // không hỗ trợ thì thôi
     }
@@ -807,6 +897,8 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyM' && !e.repeat) toggleMic();
   else if (e.code === 'KeyE' && !e.repeat) interact();
   else if (e.code === 'KeyF' && !e.repeat) punch();
+  else if (e.code === 'KeyV' && !e.repeat) toggleView();
+  else if (EMOTE_KEYS[e.code] && !e.repeat) doEmote(EMOTE_KEYS[e.code]);
   else if (e.code === 'Enter' && !e.repeat) startChat();
   else keys.add(e.code);
 });
@@ -818,6 +910,7 @@ addEventListener('mousedown', (e) => {
 if (isTouch) $('hint').textContent = 'Cần gạt bên trái để đi, kéo bên phải để nhìn quanh. Dùng các nút ở góc để ngồi, chat, mic.';
 
 const SPEED = 4;
+const PLAYER_RADIUS = 0.25; // m: bề rộng thân khi va chạm với ghế, loa...
 const EYE_HEIGHT = 1.6;
 const clock = new THREE.Clock();
 const SEND_INTERVAL = 1 / 15;
@@ -878,6 +971,9 @@ function animate() {
     // giữ trong phòng và bước theo độ cao bậc thang / sân khấu
     p.x = THREE.MathUtils.clamp(p.x, ROOM.minX + 0.5, ROOM.maxX - 0.5);
     p.z = THREE.MathUtils.clamp(p.z, ROOM.minZ + 0.5, ROOM.maxZ - 0.5);
+    const pushed = resolveCollisions(p.x, p.z, PLAYER_RADIUS); // không đi xuyên ghế, loa, mic...
+    p.x = pushed.x;
+    p.z = pushed.z;
     targetY = floorHeight(p.x, p.z) + EYE_HEIGHT;
   }
   p.y += (targetY - p.y) * Math.min(1, dt * 12);
@@ -920,6 +1016,43 @@ function animate() {
 
   avatars.update(dt);
   cinema.updateEffects(dt); // đèn sân khấu sáng/tắt dần
+  confetti.update(dt);
+  fpHand.update(now);
+
+  // Góc nhìn thứ 3: avatar của mình hiện ra đúng chỗ người chơi đứng, còn camera chỉ lùi ra sau lúc vẽ
+  // (vị trí thật của người chơi vẫn là vị trí mắt nên mọi tính toán khác không đổi)
+  const third = isThirdPerson();
+  const me = selfAvatar.items.get(SELF);
+  if (me) {
+    // Góc nhìn thứ nhất khi đứng: vẫn hiện thân mình (lùi ra sau mắt một chút) để cúi xuống thấy người mình;
+    // ẩn kính, nhãn tên và tay vì những thứ này nằm sát mắt. Ngồi/hát thì ẩn hẳn.
+    const standing = mySeat === null && myStage === null;
+    me.group.visible = standing;
+    me.visor.visible = me.sprite.visible = me.hands.root.visible = third;
+    if (standing) {
+      const ry = camera.rotation.y;
+      const back = third ? 0 : FIRST_PERSON_BODY_SETBACK; // lùi ngược hướng nhìn
+      const width = third ? 1 : FIRST_PERSON_BODY_WIDTH; // thân gầy đi khi nhìn từ mắt, khỏi chiếm cả màn hình lúc cúi
+      me.body.scale.x = me.body.scale.z = width; // chỉ thân gầy đi, hai bàn chân giữ nguyên để còn lộ ra
+      const target = { x: p.x + Math.sin(ry) * back, y: p.y - EYE_HEIGHT, z: p.z + Math.cos(ry) * back, ry };
+      selfAvatar.setTarget(SELF, target);
+      me.group.position.set(target.x, target.y, target.z); // bám sát, không nội suy
+      me.group.rotation.y = ry;
+      selfAvatar.update(dt);
+    }
+  }
+  if (third) fpHand.hand.visible = false; // tay nhìn từ mắt không dùng ở góc nhìn này
+  const eyePos = third ? p.clone() : null;
+  if (third) {
+    // Camera xoay quanh nhân vật: lùi ra sau theo đúng hướng nhìn (gồm cả cúi/ngẩng), nên cúi xuống thì camera
+    // bay lên cao nhìn xuống nhân vật, ngẩng lên thì hạ thấp (không xuống dưới sàn)
+    camera.getWorldDirection(thirdDir);
+    const cx = THREE.MathUtils.clamp(p.x - thirdDir.x * THIRD_DISTANCE, ROOM.minX + 0.3, ROOM.maxX - 0.3);
+    const cz = THREE.MathUtils.clamp(p.z - thirdDir.z * THIRD_DISTANCE, ROOM.minZ + 0.3, ROOM.maxZ - 0.3);
+    const cy = Math.min(p.y - THIRD_PIVOT_DROP - thirdDir.y * THIRD_DISTANCE, ROOM.height - 0.3);
+    camera.position.set(cx, Math.max(cy, floorHeight(cx, cz) + 0.3), cz);
+  }
+
   const shaking = isStunned();
   if (shaking) {
     applyShake(now);
@@ -928,12 +1061,13 @@ function animate() {
   renderer.render(scene, camera);
   if (!NO_CSS) cssRenderer.render(cssScene, camera);
   if (shaking) camera.quaternion.copy(savedQuat);
+  if (eyePos) camera.position.copy(eyePos);
 }
 animate();
 
 addEventListener('resize', () => {
-  camera.aspect = innerWidth / innerHeight;
+  camera.aspect = viewW() / viewH();
   camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
-  cssRenderer.setSize(innerWidth, innerHeight);
+  renderer.setSize(viewW(), viewH());
+  cssRenderer.setSize(viewW(), viewH());
 });

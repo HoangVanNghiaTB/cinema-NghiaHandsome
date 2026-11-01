@@ -139,6 +139,7 @@ export class Avatars {
     group.rotation.y = ry;
     const hands = new AvatarHands(group, color);
     if (holding === 'lightstick') hands.setHolding(true);
+    else if (holding === 'eat') hands.setEating(true);
     this.scene.add(group);
     this.items.set(id, {
       group, body, visor, sprite, hands, feet, mouthMeshes, target: { x, y, z, ry },
@@ -193,8 +194,12 @@ export class Avatars {
     this.items.get(id)?.hands.play(type);
   }
 
-  setHolding(id, on) {
-    this.items.get(id)?.hands.setHolding(on);
+  // Cầm / cất một thứ: type 'lightstick' hoặc 'eat' (bát và đũa)
+  setHolding(id, type, on) {
+    const hands = this.items.get(id)?.hands;
+    if (!hands) return;
+    if (type === 'lightstick') hands.setHolding(on);
+    else if (type === 'eat') hands.setEating(on);
   }
 
   swing(id) {

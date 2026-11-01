@@ -7,6 +7,7 @@ import { viewW, viewH } from './ui/viewport.js';
 import { StunRing } from './scene/stunRing.js';
 import { Confetti } from './scene/confetti.js';
 import { FirstPersonHand } from './scene/fpHand.js';
+import { AvatarHands } from './scene/avatarHands.js';
 import { createSounds, STEP_LENGTH } from './audio/sounds.js';
 import { createYouTubePlayer, parseVideoId } from './player/youtube.js';
 import { Avatars } from './scene/avatars.js';
@@ -76,6 +77,7 @@ if (NO_CSS) document.getElementById('css-layer').style.display = 'none';
 const cinema = buildCinema(scene, { lowQuality });
 const confetti = new Confetti(scene, { perBurst: lowQuality ? 24 : 40 }); // ít hạt hơn ở chế độ nhẹ
 const fpHand = new FirstPersonHand(camera); // bàn tay của mình khi tát
+const fpEat = new AvatarHands(camera, 0xffffff, { viewmodel: true }); // bát và đũa nhìn từ mắt mình khi ăn cơm (góc nhìn thứ nhất)
 
 // Màn hình video: div thu nhỏ cho khớp màn hình 3D. Chế độ thấp dùng 480p để YouTube
 // gửi video nhẹ hơn (giải mã video bằng CPU rất tốn trên máy không có tăng tốc phần cứng)
@@ -269,12 +271,31 @@ const avatars = new Avatars(scene, { onStep: (x, z) => sounds.playStepAt(x, z) }
 // Avatar của chính mình, chỉ hiện ở góc nhìn thứ 3 (không tiếng bước chân vì tiếng của mình đã phát riêng)
 const selfAvatar = new Avatars(scene);
 const SELF = 'me';
-// Góc nhìn thứ 3 chỉ dùng khi đang đứng; ngồi hoặc hát thì tự về góc nhìn thứ nhất (lựa chọn vẫn được nhớ)
+// Góc nhìn thứ 3 dùng được khi đứng và khi ngồi; hát thì tự về góc nhìn thứ nhất (lựa chọn vẫn được nhớ)
 let thirdPersonPref = false;
-const isThirdPerson = () => thirdPersonPref && mySeat === null && myStage === null;
+const isThirdPerson = () => thirdPersonPref && myStage === null;
 const THIRD_DISTANCE = 2.8;
+const THIRD_DISTANCE_SEATED = 1.6; // ngồi thì camera gần hơn: ở giữa hàng ghế mình và hàng ghế phía sau, không chui vào ghế khác
 const THIRD_PIVOT_DROP = 0.1; // m: tâm xoay thấp hơn mắt một chút (ngang đầu/cổ nhân vật)
 const thirdDir = new THREE.Vector3();
+// "Con mắt" kiểu PUBG (chỉ ở góc nhìn thứ 3): xoay camera quanh nhân vật mà không quay người, để nhìn mặt trước.
+// Máy tính giữ phím Alt; điện thoại bấm nút con mắt để bật/tắt. Tắt thì camera về lại sau lưng.
+let freeLook = false;
+let freeYaw = 0;
+let freePitch = 0;
+let eyeButtonShown = null;
+function setFreeLook(on) {
+  if (freeLook === on) return;
+  freeLook = on;
+  freeYaw = 0;
+  freePitch = 0;
+  if (!isTouch) controls.pointerSpeed = on ? 0 : isStunned() ? 0 : 1; // đang xoay mắt thì chuột không quay người
+  touch?.setEyeActive(on);
+}
+function freeLookBy(dx, dy, sensitivity) {
+  freeYaw -= dx * sensitivity;
+  freePitch = THREE.MathUtils.clamp(freePitch - dy * sensitivity, -1.2, 1.2);
+}
 // Thân mình nhìn từ mắt: gầy đi (bán kính 0.3 -> ~0.2) và lùi ra sau mắt một chút (nhỏ hơn bán kính mới, nhưng đủ
 // xa để mặt trên của thân nằm dưới mắt hơn 0.1 m, tránh bị cắt bởi mặt phẳng gần của camera)
 const FIRST_PERSON_BODY_WIDTH = 0.65;
@@ -282,9 +303,7 @@ const FIRST_PERSON_BODY_SETBACK = 0.18; // m
 
 function toggleView() {
   thirdPersonPref = !thirdPersonPref;
-  if (mySeat !== null || myStage !== null) {
-    addChatLine('Góc nhìn thứ 3 chỉ dùng khi đứng; sẽ áp dụng khi bạn đứng dậy.', { system: true });
-  }
+  if (myStage !== null) addChatLine('Đang hát thì dùng góc nhìn thứ nhất; góc nhìn thứ 3 sẽ áp dụng khi bạn dừng hát.', { system: true });
 }
 let myId = null;
 const names = new Map(); // id -> tên, để báo ai vào/rời phòng
@@ -380,6 +399,7 @@ let room = null;
 const setNetStatus = (text) => ($('net').textContent = text);
 
 function joinRoom(profile) {
+  fpEat.setEating(false);
   selfAvatar.remove(SELF);
   selfAvatar.add({ id: SELF, name: profile.name, color: profile.color });
   room = connectToRoom(profile, {
@@ -454,9 +474,13 @@ function joinRoom(profile) {
     onStageDenied: () => addChatLine('Sân khấu này đã có người hát.', { system: true }),
     onStun: ({ id, duration }) => startStun(id, duration),
     onEmote: ({ id, type, on }) => {
-      if (type === 'lightstick') {
-        if (id === myId) selfAvatar.setHolding(SELF, !!on);
-        else avatars.setHolding(id, !!on);
+      if (type === 'lightstick' || type === 'eat') {
+        // cầm lightstick / bát đũa: giữ cho tới khi tự tắt
+        if (id === myId) {
+          selfAvatar.setHolding(SELF, type, !!on);
+          if (type === 'eat') fpEat.setEating(!!on);
+        }
+        else avatars.setHolding(id, type, !!on);
         return;
       }
       if (id === myId) selfAvatar.playAction(SELF, type);
@@ -807,7 +831,7 @@ function applyShake(nowMs) {
 }
 
 // Hành động: phím số 1-4 (điện thoại: nút Hành động). Server kiểm tra thời gian chờ và quyết định có làm không.
-const EMOTE_KEYS = { Digit1: 'clap', Digit2: 'confetti', Digit3: 'lightstick', Digit4: 'heart' };
+const EMOTE_KEYS = { Digit1: 'clap', Digit2: 'confetti', Digit3: 'lightstick', Digit4: 'heart', Digit5: 'eat' };
 function doEmote(type) {
   if (!room || !myId || isStunned()) return;
   room.emote(type);
@@ -842,6 +866,10 @@ const touch = isTouch
   ? createTouchControls({
       onLook: (dx, dy) => {
         if (isStunned()) return;
+        if (freeLook) {
+          freeLookBy(dx, dy, LOOK_SENSITIVITY);
+          return;
+        }
         yaw -= dx * LOOK_SENSITIVITY;
         pitch = THREE.MathUtils.clamp(pitch - dy * LOOK_SENSITIVITY, -1.4, 1.4);
         camera.rotation.set(pitch, yaw, 0);
@@ -852,6 +880,7 @@ const touch = isTouch
       onSit: interact,
       onPunch: punch,
       onView: toggleView,
+      onEye: () => isThirdPerson() && setFreeLook(!freeLook),
       onAction: doEmote,
     })
   : null;
@@ -894,6 +923,11 @@ controls.addEventListener('unlock', () => setActive(false));
 
 addEventListener('keydown', (e) => {
   if (!controls.isLocked) return;
+  if (e.code === 'AltLeft' || e.code === 'AltRight') {
+    e.preventDefault(); // Alt không được mở menu của trình duyệt
+    if (isThirdPerson()) setFreeLook(true);
+    return;
+  }
   if (e.code === 'KeyM' && !e.repeat) toggleMic();
   else if (e.code === 'KeyE' && !e.repeat) interact();
   else if (e.code === 'KeyF' && !e.repeat) punch();
@@ -902,7 +936,14 @@ addEventListener('keydown', (e) => {
   else if (e.code === 'Enter' && !e.repeat) startChat();
   else keys.add(e.code);
 });
-addEventListener('keyup', (e) => keys.delete(e.code));
+addEventListener('keyup', (e) => {
+  keys.delete(e.code);
+  if (e.code === 'AltLeft' || e.code === 'AltRight') setFreeLook(false);
+});
+addEventListener('blur', () => setFreeLook(false)); // chuyển cửa sổ lúc đang giữ Alt thì không bị kẹt
+addEventListener('mousemove', (e) => {
+  if (freeLook && controls.isLocked) freeLookBy(e.movementX, e.movementY, 0.002);
+});
 addEventListener('mousedown', (e) => {
   if (controls.isLocked && e.button === 0) punch(); // chuột trái khi đang trong rạp
 });
@@ -1025,16 +1066,19 @@ function animate() {
   const me = selfAvatar.items.get(SELF);
   if (me) {
     // Góc nhìn thứ nhất khi đứng: vẫn hiện thân mình (lùi ra sau mắt một chút) để cúi xuống thấy người mình;
-    // ẩn kính, nhãn tên và tay vì những thứ này nằm sát mắt. Ngồi/hát thì ẩn hẳn.
+    // ẩn kính, nhãn tên và tay vì những thứ này nằm sát mắt. Ngồi/hát mà ở góc nhìn thứ nhất thì ẩn hẳn.
     const standing = mySeat === null && myStage === null;
-    me.group.visible = standing;
+    const seated = mySeat !== null;
+    if (me.seated !== seated) selfAvatar.setSeated(SELF, seated); // ngồi thì thân thấp xuống như người khác thấy
+    me.group.visible = standing || third;
     me.visor.visible = me.sprite.visible = me.hands.root.visible = third;
-    if (standing) {
+    if (me.group.visible) {
       const ry = camera.rotation.y;
       const back = third ? 0 : FIRST_PERSON_BODY_SETBACK; // lùi ngược hướng nhìn
       const width = third ? 1 : FIRST_PERSON_BODY_WIDTH; // thân gầy đi khi nhìn từ mắt, khỏi chiếm cả màn hình lúc cúi
       me.body.scale.x = me.body.scale.z = width; // chỉ thân gầy đi, hai bàn chân giữ nguyên để còn lộ ra
-      const target = { x: p.x + Math.sin(ry) * back, y: p.y - EYE_HEIGHT, z: p.z + Math.cos(ry) * back, ry };
+      const eye = seated ? SEATED_EYE_HEIGHT : EYE_HEIGHT; // cùng cách tính độ cao chân như lúc gửi cho người khác
+      const target = { x: p.x + Math.sin(ry) * back, y: p.y - eye, z: p.z + Math.cos(ry) * back, ry };
       selfAvatar.setTarget(SELF, target);
       me.group.position.set(target.x, target.y, target.z); // bám sát, không nội suy
       me.group.rotation.y = ry;
@@ -1042,14 +1086,28 @@ function animate() {
     }
   }
   if (third) fpHand.hand.visible = false; // tay nhìn từ mắt không dùng ở góc nhìn này
+  fpEat.setViewVisible(!third);
+  fpEat.update(now);
+  if (!third && freeLook) setFreeLook(false); // ngồi/hát hoặc về góc nhìn 1 thì thôi xoay mắt
+  if (touch && eyeButtonShown !== third) {
+    eyeButtonShown = third;
+    touch.setEyeVisible(third);
+  }
   const eyePos = third ? p.clone() : null;
+  let restoreRotation = null;
   if (third) {
     // Camera xoay quanh nhân vật: lùi ra sau theo đúng hướng nhìn (gồm cả cúi/ngẩng), nên cúi xuống thì camera
     // bay lên cao nhìn xuống nhân vật, ngẩng lên thì hạ thấp (không xuống dưới sàn)
+    if (freeLook) {
+      restoreRotation = [camera.rotation.x, camera.rotation.y];
+      camera.rotation.set(THREE.MathUtils.clamp(restoreRotation[0] + freePitch, -1.4, 1.4), restoreRotation[1] + freeYaw, 0);
+    }
     camera.getWorldDirection(thirdDir);
-    const cx = THREE.MathUtils.clamp(p.x - thirdDir.x * THIRD_DISTANCE, ROOM.minX + 0.3, ROOM.maxX - 0.3);
-    const cz = THREE.MathUtils.clamp(p.z - thirdDir.z * THIRD_DISTANCE, ROOM.minZ + 0.3, ROOM.maxZ - 0.3);
-    const cy = Math.min(p.y - THIRD_PIVOT_DROP - thirdDir.y * THIRD_DISTANCE, ROOM.height - 0.3);
+    // tâm xoay luôn là đầu nhân vật (mắt hạ xuống một chút), đứng hay ngồi đều vậy
+    const dist = mySeat !== null ? THIRD_DISTANCE_SEATED : THIRD_DISTANCE;
+    const cx = THREE.MathUtils.clamp(p.x - thirdDir.x * dist, ROOM.minX + 0.3, ROOM.maxX - 0.3);
+    const cz = THREE.MathUtils.clamp(p.z - thirdDir.z * dist, ROOM.minZ + 0.3, ROOM.maxZ - 0.3);
+    const cy = Math.min(p.y - THIRD_PIVOT_DROP - thirdDir.y * dist, ROOM.height - 0.3);
     camera.position.set(cx, Math.max(cy, floorHeight(cx, cz) + 0.3), cz);
   }
 
@@ -1062,6 +1120,7 @@ function animate() {
   if (!NO_CSS) cssRenderer.render(cssScene, camera);
   if (shaking) camera.quaternion.copy(savedQuat);
   if (eyePos) camera.position.copy(eyePos);
+  if (restoreRotation) camera.rotation.set(restoreRotation[0], restoreRotation[1], 0);
 }
 animate();
 

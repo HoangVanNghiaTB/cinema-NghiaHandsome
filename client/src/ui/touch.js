@@ -6,7 +6,7 @@ import { mapDelta } from './viewport.js';
 const JOY_RADIUS = 55; // px: quãng kéo cần gạt tối đa
 
 // onLook(dx, dy): độ dịch ngón tay (px) khi kéo nhìn quanh
-export function createTouchControls({ onLook, onMenu, onMic, onChat, onSit, onPunch, onAction, onView }) {
+export function createTouchControls({ onLook, onMenu, onMic, onChat, onSit, onPunch, onAction, onView, onEye }) {
   const $ = (id) => document.getElementById(id);
   const root = $('touch-ui');
   const joy = $('joy');
@@ -109,6 +109,8 @@ export function createTouchControls({ onLook, onMenu, onMic, onChat, onSit, onPu
   btnSit.addEventListener('click', onSit);
   $('btn-punch').addEventListener('click', onPunch);
   $('btn-view').addEventListener('click', onView);
+  const btnEye = $('btn-eye');
+  btnEye.addEventListener('click', onEye);
 
   // Nút "Hành động" mở một hàng biểu tượng nhỏ; chọn xong thì đóng lại. Chạm ra ngoài cũng đóng.
   const panel = $('action-panel');
@@ -140,6 +142,13 @@ export function createTouchControls({ onLook, onMenu, onMic, onChat, onSit, onPu
     setSitButton(label) {
       btnSit.style.display = label ? 'flex' : 'none';
       if (label) btnSit.textContent = label;
+    },
+    // Nút con mắt (xoay camera quanh nhân vật): chỉ hiện ở góc nhìn thứ 3; sáng lên khi đang xoay mắt
+    setEyeVisible(visible) {
+      btnEye.style.display = visible ? 'flex' : 'none';
+    },
+    setEyeActive(on) {
+      btnEye.classList.toggle('on', on);
     },
     setMicOn(on) {
       btnMic.classList.toggle('on', on);

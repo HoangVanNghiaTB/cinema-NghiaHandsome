@@ -4,6 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>Rạp chiếu phim 3D</title>
+    <!-- Thêm vào Màn hình chính thì mở ra toàn màn hình, không còn thanh công cụ của trình duyệt -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Nghia KTV" />
     <script>
       // Điện thoại để dọc: xoay cả trang thành ngang (không cần người dùng xoay máy / tắt khoá xoay)
       (function () {
@@ -139,6 +147,10 @@
         position: absolute; top: max(12px, env(safe-area-inset-top)); right: calc(max(12px, env(safe-area-inset-right)) + 54px);
         width: 44px; height: 44px; font-size: 20px;
       }
+      #touch-ui #btn-eye {
+        display: none; position: absolute; top: max(12px, env(safe-area-inset-top));
+        right: calc(max(12px, env(safe-area-inset-right)) + 108px); width: 44px; height: 44px; font-size: 20px;
+      }
       /* Cụm nút kiểu game MOBA: nút Đánh to ở góc dưới phải, các nút nhỏ xếp vòng cung quanh nó */
       #touch-buttons {
         position: absolute; right: max(16px, env(safe-area-inset-right)); bottom: max(20px, env(safe-area-inset-bottom));
@@ -229,10 +241,12 @@
       <div id="joy"><div id="joy-knob"></div></div>
       <button id="btn-menu" aria-label="Menu">&#9776;</button>
       <button id="btn-view" aria-label="Đổi góc nhìn">&#128247;</button>
+      <button id="btn-eye" aria-label="Xoay mắt nhìn quanh nhân vật">&#128065;</button>
       <div id="action-panel">
         <button data-action="clap"><span class="emoji">&#128079;</span><small>Vỗ tay</small></button>
         <button data-action="confetti"><span class="emoji">&#127881;</span><small>Pháo</small></button>
         <button data-action="lightstick"><span class="emoji">&#10024;</span><small>Lightstick</small></button>
+        <button data-action="eat"><span class="emoji">&#127834;</span><small>Ăn cơm</small></button>
         <button data-action="heart"><span class="emoji">&#128150;</span><small>Tim</small></button>
       </div>
       <div id="touch-buttons">
@@ -291,7 +305,7 @@
         <label><input type="checkbox" id="show-fps" checked /> Hiện FPS</label>
       </div>
       <div id="msg"></div>
-      <small id="hint">WASD để đi, chuột để nhìn, M để bật/tắt mic, E để ngồi/đứng/hát (gần ghế hoặc sân khấu), chuột trái hoặc F để đánh, phím 1 vỗ tay · 2 pháo giấy · 3 lightstick · 4 trái tim, Enter để chat, Esc để mở menu này</small>
+      <small id="hint">WASD để đi, chuột để nhìn, M để bật/tắt mic, E để ngồi/đứng/hát (gần ghế hoặc sân khấu), chuột trái hoặc F để đánh, phím 1 vỗ tay · 2 pháo giấy · 3 lightstick · 4 trái tim · 5 ăn cơm (bấm lại để thôi), V đổi góc nhìn 1/3 (góc 3: giữ Alt để xoay mắt nhìn quanh nhân vật), Enter để chat, Esc để mở menu này</small>
     </div>
     <script type="module" src="/src/main.js"></script>
   </body>

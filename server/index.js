@@ -11,8 +11,9 @@ const SEAT_COUNT = 18; // phải khớp SEATS.length ở client/src/scene/cinema
 const STAGE_COUNT = 2; // phải khớp STAGES.length ở client/src/scene/cinema.js; mỗi sân khấu một mic, một người hát
 
 // Hành động (emote): server chỉ nhận loại có trong danh sách này, và chặn gửi liên tục (thời gian chờ mỗi loại, ms).
-// clap, confetti, heart là hành động bắn một lần; lightstick là trạng thái bật/tắt (server nhớ để người vào sau thấy)
-const EMOTE_COOLDOWN_MS = { clap: 3000, confetti: 2500, heart: 3500, lightstick: 400 };
+// clap, confetti, heart là hành động bắn một lần; lightstick và eat (bát đũa) là trạng thái bật/tắt (server nhớ để người vào sau thấy)
+const EMOTE_COOLDOWN_MS = { clap: 3000, confetti: 2500, heart: 3500, lightstick: 400, eat: 400 };
+const HOLDABLE_EMOTES = ['lightstick', 'eat'];
 
 // Đánh nhau: server kiểm tra tầm đánh, hướng nhìn và thời gian chờ để không ai gian lận hay spam
 const PUNCH_RANGE = 1.8; // m
@@ -99,7 +100,7 @@ io.on('connection', (socket) => {
       ry: 0,
       seat: null, // chỉ số ghế đang ngồi, hoặc null
       stage: null, // chỉ số sân khấu đang hát, hoặc null
-      holding: null, // vật đang cầm ('lightstick'), hoặc null
+      holding: null, // vật đang cầm ('lightstick' | 'eat'), hoặc null
       emoteAt: {}, // loại hành động -> lần cuối làm (để tính thời gian chờ)
       lastPunchAt: 0,
       stunnedUntil: 0,
@@ -132,9 +133,12 @@ io.on('connection', (socket) => {
     const now = Date.now();
     if (now < p.stunnedUntil || now - (p.emoteAt[data.type] ?? 0) < EMOTE_COOLDOWN_MS[data.type]) return;
     p.emoteAt[data.type] = now;
-    if (data.type === 'lightstick') {
-      p.holding = p.holding ? null : 'lightstick'; // bấm để cầm, bấm lại để cất
-      io.emit('emote', { id: p.id, type: 'lightstick', on: p.holding !== null });
+    if (HOLDABLE_EMOTES.includes(data.type)) {
+      // bấm để cầm, bấm lại để cất; đang cầm thứ khác thì đổi sang thứ này (mỗi người chỉ cầm một thứ)
+      const previous = p.holding;
+      p.holding = previous === data.type ? null : data.type;
+      if (previous && previous !== data.type) io.emit('emote', { id: p.id, type: previous, on: false });
+      io.emit('emote', { id: p.id, type: data.type, on: p.holding === data.type });
     } else {
       io.emit('emote', { id: p.id, type: data.type });
     }

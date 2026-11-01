@@ -16,6 +16,30 @@ const handGeo = new THREE.SphereGeometry(0.075, 10, 8);
 const handMat = new THREE.MeshLambertMaterial({ color: SKIN });
 const stickGeo = new THREE.CylinderGeometry(0.018, 0.018, 0.55, 8);
 
+// Ăn cơm: tay trái cầm bát, tay phải cầm đũa; đũa gắp cơm đưa lên miệng rồi quay lại bát (chu kỳ EAT_PERIOD_MS)
+const EAT_PERIOD_MS = 2400;
+const CHOPSTICK_LENGTH = 0.26;
+const chopstickGeo = new THREE.CylinderGeometry(0.011, 0.008, CHOPSTICK_LENGTH, 6); // to hơn thật một chút để còn thấy được từ xa
+const chopstickMat = new THREE.MeshLambertMaterial({ color: 0xe0b878 });
+const bowlGeo = new THREE.SphereGeometry(0.11, 14, 8, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2); // nửa cầu dưới, hở miệng lên trên
+const bowlMat = new THREE.MeshLambertMaterial({ color: 0xdfe9f5, side: THREE.DoubleSide });
+const riceGeo = new THREE.SphereGeometry(0.1, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2); // nắm cơm đầy lên miệng bát
+const riceMat = new THREE.MeshLambertMaterial({ color: 0xfafafa });
+const riceGrainGeo = new THREE.SphereGeometry(0.03, 8, 6); // miếng cơm kẹp ở đầu đũa
+
+// Bộ vật liệu: dùng chung cho mọi avatar; tay nhìn từ mắt (viewmodel) thì có bộ riêng tắt kiểm tra độ sâu và vẽ sau cùng,
+// để đứng sát tường tay vẫn không bị tường che
+const SHARED_MATS = { hand: handMat, chop: chopstickMat, bowl: bowlMat, rice: riceMat };
+function makeViewmodelMats() {
+  const nodepth = (m) => {
+    const c = m.clone();
+    c.depthTest = false;
+    return c;
+  };
+  return { hand: nodepth(handMat), chop: nodepth(chopstickMat), bowl: nodepth(bowlMat), rice: nodepth(riceMat) };
+}
+const VIEWMODEL_RENDER_ORDER = 1000;
+
 let glowTexture = null;
 function getGlowTexture() {
   if (glowTexture) return glowTexture;
@@ -60,11 +84,19 @@ const easeInOut = (t) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
 
 export class AvatarHands {
   // parent: nhóm của avatar; color: màu avatar (lightstick sáng theo màu này)
-  constructor(parent, color) {
+  // viewmodel: tay nhìn từ mắt mình (parent là camera; vị trí tính trong hệ toạ độ camera), chỉ dùng để diễn ăn cơm
+  constructor(parent, color, { viewmodel = false } = {}) {
     this.parent = parent;
+    this.viewmodel = viewmodel;
+    this.viewVisible = true;
+    this.mats = viewmodel ? makeViewmodelMats() : SHARED_MATS;
     this.root = new THREE.Group();
-    this.left = new THREE.Mesh(handGeo, handMat);
-    this.right = new THREE.Mesh(handGeo, handMat);
+    this.left = new THREE.Mesh(handGeo, this.mats.hand);
+    this.right = new THREE.Mesh(handGeo, this.mats.hand);
+    if (viewmodel) {
+      this.left.renderOrder = this.right.renderOrder = VIEWMODEL_RENDER_ORDER;
+      this.root.scale.setScalar(0.8); // nhìn từ mắt thì nhỏ lại một chút, khỏi che nhiều màn hình
+    }
     this.root.add(this.left, this.right);
     parent.add(this.root);
 
@@ -74,6 +106,7 @@ export class AvatarHands {
     this.swingStart = null; // lúc bắt đầu một cú tát
     this.stick = null; // { group, mats } khi đang cầm lightstick (ở tay trái)
     this.heart = null; // sprite trái tim, tạo khi cần
+    this.eat = null; // { bowl, chopsticks, grain } khi đang ăn cơm
     this.update(performance.now());
   }
 
@@ -105,6 +138,39 @@ export class AvatarHands {
     }
   }
 
+  // Bắt đầu / dừng ăn cơm: bát ở tay trái, đũa ở tay phải (hình và vật liệu dùng chung nên không cần huỷ)
+  setEating(on) {
+    if (on && !this.eat) {
+      const bowl = new THREE.Group();
+      const shell = new THREE.Mesh(bowlGeo, this.mats.bowl);
+      const rice = new THREE.Mesh(riceGeo, this.mats.rice);
+      rice.scale.y = 0.6;
+      bowl.add(shell, rice);
+      bowl.position.y = 0.1; // tay đỡ dưới đáy bát
+      this.left.add(bowl);
+
+      const chopsticks = new THREE.Group();
+      for (const side of [-1, 1]) {
+        const stick = new THREE.Mesh(chopstickGeo, this.mats.chop);
+        stick.position.set(side * 0.01, CHOPSTICK_LENGTH / 2, 0);
+        stick.rotation.z = -side * 0.05; // hai chiếc hơi chụm lại ở đầu
+        chopsticks.add(stick);
+      }
+      const grain = new THREE.Mesh(riceGrainGeo, this.mats.rice);
+      grain.position.y = CHOPSTICK_LENGTH;
+      chopsticks.add(grain);
+      if (this.viewmodel) {
+        for (const g of [bowl, chopsticks]) g.traverse((o) => (o.renderOrder = VIEWMODEL_RENDER_ORDER));
+      }
+      this.right.add(chopsticks);
+      this.eat = { bowl, chopsticks, grain };
+    } else if (!on && this.eat) {
+      this.left.remove(this.eat.bowl);
+      this.right.remove(this.eat.chopsticks);
+      this.eat = null;
+    }
+  }
+
   // Làm một hành động bắn một lần: 'clap' | 'confetti' | 'heart'
   play(type) {
     if (!DURATIONS[type]) return;
@@ -132,10 +198,65 @@ export class AvatarHands {
 
   dispose() {
     this.setHolding(false);
+    this.setEating(false);
     this.parent.remove(this.root); // hình và vật liệu chung không bị huỷ theo avatar
   }
 
+  // Tư thế ăn cơm. Tay trái giữ bát trước ngực; tay phải đưa đũa giữa bát và miệng (miệng cao ~0.7H, nằm ở mặt thân z = -0.3).
+  // Chu kỳ: 0-0.3 đưa cơm lên miệng, 0.3-0.5 nhai (hơi gật), 0.5-0.75 đưa tay về bát, 0.75-1 gắp cơm.
+  poseEating(now, H, L, R) {
+    const u = (now % EAT_PERIOD_MS) / EAT_PERIOD_MS;
+    // k: 0 = đũa ở bát, 1 = đũa ở miệng
+    let k;
+    if (u < 0.3) k = easeInOut(u / 0.3);
+    else if (u < 0.5) k = 1;
+    else if (u < 0.75) k = 1 - easeInOut((u - 0.5) / 0.25);
+    else k = 0;
+    const chew = u >= 0.3 && u < 0.5 ? Math.sin(((u - 0.3) / 0.2) * Math.PI * 4) * 0.012 : 0; // gật nhẹ khi nhai
+    const scoop = u >= 0.75 ? Math.sin(((u - 0.75) / 0.25) * Math.PI * 2) * 0.04 : 0; // nhúng đũa xuống bát
+
+    L.set(-0.18, 0.5 * H, -0.42);
+    // tay phải lệch sang phải, đũa nghiêng chéo vào giữa (nhìn từ phía trước mới thấy được đũa, không bị rút ngắn)
+    R.set(lerp(0.04, 0.15, k), lerp(0.5 * H + 0.25, 0.66 * H, k) + chew + scoop, lerp(-0.575, -0.52, k));
+    this.eat.chopsticks.rotation.z = 0.55;
+    // đũa chúc xuống bát khi gắp (góc ~135°), chĩa lên vào miệng khi ăn (~72°); trục đũa là y, quay quanh x
+    this.eat.chopsticks.rotation.x = lerp(2.36, 1.26, k);
+    this.eat.grain.visible = u >= 0.9 || u < 0.32; // có cơm trên đũa từ lúc gắp đến khi vào miệng
+  }
+
+  // Bật/tắt hiển thị tay nhìn từ mắt (chỉ hiện ở góc nhìn thứ nhất)
+  setViewVisible(visible) {
+    this.viewVisible = visible;
+  }
+
+  // Tư thế ăn cơm nhìn từ mắt mình (toạ độ camera: +x phải, +y lên, -z phía trước). Bát ở dưới bên trái tầm nhìn,
+  // đũa gắp từ bát rồi đưa lên gần mép dưới giữa màn hình (chính là miệng mình). Cùng chu kỳ với poseEating.
+  poseEatingFP(now) {
+    const L = this.left.position;
+    const R = this.right.position;
+    const u = (now % EAT_PERIOD_MS) / EAT_PERIOD_MS;
+    let k;
+    if (u < 0.3) k = easeInOut(u / 0.3);
+    else if (u < 0.5) k = 1;
+    else if (u < 0.75) k = 1 - easeInOut((u - 0.5) / 0.25);
+    else k = 0;
+    const chew = u >= 0.3 && u < 0.5 ? Math.sin(((u - 0.3) / 0.2) * Math.PI * 4) * 0.008 : 0;
+    const scoop = u >= 0.75 ? Math.sin(((u - 0.75) / 0.25) * Math.PI * 2) * 0.03 : 0;
+    const lift = Math.sin(k * Math.PI) * 0.05; // tay nhấc lên thành vòng cung giữa bát và miệng
+
+    L.set(-0.12, -0.22, -0.5);
+    R.set(lerp(0.06, 0.14, k), lerp(-0.1, -0.17, k) + lift + chew + scoop, lerp(-0.5, -0.42, k));
+    this.eat.chopsticks.rotation.x = lerp(-2.3, 1.18, k);
+    this.eat.chopsticks.rotation.z = lerp(0.9, 0.65, k);
+    this.eat.grain.visible = u >= 0.9 || u < 0.32;
+  }
+
   update(now) {
+    if (this.viewmodel) {
+      this.root.visible = !!this.eat && this.viewVisible;
+      if (this.eat) this.poseEatingFP(now);
+      return;
+    }
     const H = BODY_HEIGHT * this.s;
     const L = this.left.position;
     const R = this.right.position;
@@ -149,6 +270,8 @@ export class AvatarHands {
       this.stick.group.rotation.z = 0.25 + Math.sin(t * Math.PI * 2 * 1.6) * 0.35; // đung đưa
       this.stick.group.rotation.x = Math.sin(t * Math.PI * 2 * 0.8) * 0.15;
     }
+
+    if (this.eat) this.poseEating(now, H, L, R);
 
     const a = this.action;
     if (a) {

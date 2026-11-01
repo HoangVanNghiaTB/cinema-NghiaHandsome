@@ -1,32 +1,14 @@
 import * as THREE from 'three';
 import { STEP_LENGTH } from '../audio/sounds.js';
 import { AvatarHands } from './avatarHands.js';
+import { createFruit, BASE_GLOW } from './fruitRig.js';
 
-const BODY_LENGTH = 1.0;
-const BODY_RADIUS = 0.3;
-const BODY_HEIGHT = BODY_LENGTH + BODY_RADIUS * 2; // ~1.6 m
-// Thân nâng lên khỏi mặt sàn LEG_GAP để hở chỗ cho hai bàn chân; đỉnh đầu vẫn ở 1.6 m (thân thon lại một chút)
-const LEG_GAP = 0.14;
-const BODY_SCALE_Y = (BODY_HEIGHT - LEG_GAP) / BODY_HEIGHT;
-const BODY_CENTER_Y = (BODY_HEIGHT + LEG_GAP) / 2;
-const SEATED_SCALE = 0.62; // tỉ lệ chiều cao khi ngồi
+const SEATED_SQUASH = 0.8; // khớp fruitRig.js: ngồi thì thân thấp xuống
 const SMOOTHING = 12; // càng lớn càng bám sát vị trí mới nhận
-
-// Hai bàn chân (nhìn thẳng về -z): đi thì luân phiên bước tới/lui và nhấc lên, đứng yên thì về chỗ cũ
-const FOOT_SIZE = [0.17, 0.1, 0.34]; // rộng, cao, dài (m)
-const FOOT_SPREAD = 0.2; // lệch trái/phải so với giữa thân
-const FOOT_REST_Z = -0.2; // lệch ra trước để lộ ra khỏi đáy thân tròn (bán kính 0.3)
-const FOOT_SWING = 0.16; // m: biên độ bước tới/lui
-const FOOT_LIFT = 0.07; // m: nhấc chân lên khi bước tới
 const MIN_WALK_SPEED = 0.4; // m/s: dưới mức này coi như đứng yên
-const SHOE_COLOR = 0x6b7080; // xám sáng để nổi trên sàn đỏ sẫm
 
-// Miệng: các hình khi nói [rộng, cao, tròn?] gồm tròn, vuông, dấu "-"; hình cuối là miệng khi im (một nét ngắn)
-const MOUTH_SHAPES = [[0.07, 0, true], [0.13, 0.13, false], [0.21, 0.035, false], [0.11, 0.03, false]];
-const IDLE_MOUTH = MOUTH_SHAPES.length - 1;
-const MOUTH_COLOR = 0x15151a;
-const MOUTH_DROP = -0.23; // m: thấp hơn kính (tính trong hệ toạ độ của kính)
-const MOUTH_FORWARD = -0.011; // nhô ra trước mặt thân một chút để không bị chìm
+// Miệng: số hình khi nói (tròn, vuông, dấu "-") + hình cuối là miệng khi im; khớp MOUTH_SHAPES trong fruitRig.js
+const IDLE_MOUTH = 3;
 const MOUTH_INTERVAL = 0.12; // s: bao lâu đổi hình miệng một lần khi đang nói
 
 function makeNameSprite(name) {
@@ -43,7 +25,6 @@ function makeNameSprite(name) {
   ctx.fillText(name, 128, 34, 240);
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas) }));
   sprite.scale.set(1.2, 0.3, 1);
-  sprite.position.y = BODY_HEIGHT + 0.35;
   return sprite;
 }
 
@@ -86,7 +67,7 @@ const STAR_COUNT = 3;
 const STAR_RADIUS = 0.32;
 const STAR_SPIN = 4; // rad/giây
 
-// Avatar tối giản: viên nhộng màu + khối nhỏ chỉ hướng nhìn + nhãn tên
+// Avatar trái cây (xem fruitRig.js) + hai tay lơ lửng (AvatarHands) + nhãn tên
 export class Avatars {
   // onStep(x, z): gọi mỗi khi một avatar đi đủ một bước (để phát tiếng bước chân)
   constructor(scene, { onStep } = {}) {
@@ -95,65 +76,78 @@ export class Avatars {
     this.items = new Map(); // id -> { group, target: {x,y,z,ry} }
   }
 
-  add({ id, name, color, x = 0, y = 0, z = 0, ry = 0, seat = null, holding = null }) {
+  add({ id, name, color, look = null, x = 0, y = 0, z = 0, ry = 0, seat = null, holding = null }) {
     if (this.items.has(id)) return;
     const group = new THREE.Group();
-
-    const body = new THREE.Mesh(
-      new THREE.CapsuleGeometry(BODY_RADIUS, BODY_LENGTH, 4, 12),
-      new THREE.MeshLambertMaterial({ color })
-    );
-    body.scale.y = BODY_SCALE_Y;
-    body.position.y = BODY_CENTER_Y;
-    group.add(body);
-
-    const visor = new THREE.Mesh(
-      new THREE.BoxGeometry(0.3, 0.1, 0.1),
-      new THREE.MeshLambertMaterial({ color: 0x111111 })
-    );
-    visor.position.set(0, BODY_HEIGHT - 0.25, -BODY_RADIUS);
-    group.add(visor);
-
-    // Miệng dán trên mặt thân, dưới kính (là con của kính nên ẩn kính thì miệng ẩn theo). Nói thì đổi hình tròn / vuông / dấu "-".
-    const mouthMat = new THREE.MeshBasicMaterial({ color: MOUTH_COLOR, side: THREE.DoubleSide });
-    const mouthMeshes = MOUTH_SHAPES.map(([w, h, round]) => {
-      const mesh = new THREE.Mesh(round ? new THREE.CircleGeometry(w, 16) : new THREE.PlaneGeometry(w, h), mouthMat);
-      mesh.position.set(0, MOUTH_DROP, MOUTH_FORWARD);
-      mesh.visible = false;
-      visor.add(mesh);
-      return mesh;
-    });
-    mouthMeshes[IDLE_MOUTH].visible = true;
-
-    const shoeMat = new THREE.MeshLambertMaterial({ color: SHOE_COLOR });
-    const feet = [-1, 1].map((side) => {
-      const foot = new THREE.Mesh(new THREE.BoxGeometry(...FOOT_SIZE), shoeMat);
-      foot.position.set(side * FOOT_SPREAD, FOOT_SIZE[1] / 2, FOOT_REST_Z);
-      group.add(foot);
-      return foot;
-    });
-
     const sprite = makeNameSprite(name);
     group.add(sprite);
     group.position.set(x, y, z);
     group.rotation.y = ry;
     const hands = new AvatarHands(group, color);
-    if (holding === 'lightstick') hands.setHolding(true);
-    else if (holding === 'eat') hands.setEating(true);
-    this.scene.add(group);
-    this.items.set(id, {
-      group, body, visor, sprite, hands, feet, mouthMeshes, target: { x, y, z, ry },
+    const item = {
+      group, sprite, hands, color, target: { x, y, z, ry },
+      stunned: false, dancing: holding === 'lightstick',
       speaking: false, mouthTimer: 0, mouthShape: IDLE_MOUTH,
       seated: false, lastX: x, lastZ: z, stepDist: 0, // theo dõi quãng đường để biết khi nào có một bước
       walkPhase: 0, walkAmp: 0, // pha bước chân và mức độ đang đi (0 = đứng yên, 1 = đang đi)
-    });
+      // "visor": chỉ để main.js bật/tắt cả mặt và đồ trên đầu (camera nằm trong thân khi nhìn từ mắt)
+      visor: {
+        get visible() {
+          return item.fruit.faceVisible;
+        },
+        set visible(v) {
+          item.fruit.setFaceVisible(v);
+        },
+      },
+    };
+    this.items.set(id, item);
+    this.build(item, look);
+    if (holding === 'lightstick') hands.setHolding(true);
+    else if (holding === 'eat') hands.setEating(true);
+    this.scene.add(group);
     if (seat !== null) this.setSeated(id, true);
+  }
+
+  // Dựng (hoặc dựng lại khi đổi kiểu nhân vật) thân trái cây cho avatar: item.fruit, item.body, item.mouthMeshes
+  build(item, look) {
+    const faceWasVisible = item.fruit?.faceVisible ?? true;
+    const prev = item.fruit;
+    if (prev) {
+      item.group.remove(prev.wrap);
+      prev.dispose();
+    }
+    const fruit = createFruit(item.color, look?.kind);
+    fruit.setLook(look ?? undefined); // kiểu, loại trái, phụ kiện, màu thân (xem looks.js)
+    fruit.setFaceVisible(faceWasVisible);
+    item.fruit = fruit;
+    item.body = fruit.wrap; // main.js co/giãn nhóm này khi nhìn từ mắt
+    item.mouthMeshes = fruit.mouthMeshes;
+    item.mouthShape = IDLE_MOUTH;
+    item.group.add(fruit.wrap);
+    item.hands.setReach(fruit.hands);
+    item.hands.setSkin(fruit.color);
+    this.applySeated(item);
+    const mat = fruit.bodyMat;
+    mat.emissiveIntensity = item.speaking ? 0.9 : BASE_GLOW;
+  }
+
+  // Đổi kiểu / loại trái / phụ kiện / màu thân
+  setLook(id, look) {
+    const item = this.items.get(id);
+    if (!item) return;
+    if (item.fruit.kind !== (look?.kind ?? 'chubby_m')) {
+      this.build(item, look); // đổi kiểu thân thì dựng lại
+      return;
+    }
+    item.fruit.setLook(look);
+    item.hands.setSkin(item.fruit.color);
   }
 
   // Choáng thì có mấy ngôi sao quay vòng trên đầu
   setStunned(id, stunned) {
     const item = this.items.get(id);
     if (!item) return;
+    item.stunned = stunned;
     if (!stunned) {
       if (item.stars) {
         item.group.remove(item.stars);
@@ -170,23 +164,24 @@ export class Avatars {
       star.position.set(Math.cos(a) * STAR_RADIUS, 0, Math.sin(a) * STAR_RADIUS);
       stars.add(star);
     }
-    stars.position.y = BODY_HEIGHT + 0.1;
+    stars.position.y = (item.seated ? item.fruit.top * SEATED_SQUASH : item.fruit.top) + 0.1;
     item.group.add(stars);
     item.stars = stars;
   }
 
-  // Ngồi thì thân avatar thấp xuống (nén theo chiều cao), nhãn tên hạ theo
+  // Ngồi thì thân thấp xuống một chút (fruitRig.pose lo phần co thân), tay và nhãn tên hạ theo
   setSeated(id, seated) {
     const item = this.items.get(id);
     if (!item) return;
     item.seated = seated;
-    const s = seated ? SEATED_SCALE : 1;
-    item.hands.setScale(s);
-    item.body.scale.y = BODY_SCALE_Y * s;
-    item.body.position.y = BODY_CENTER_Y * s;
-    item.visor.position.y = (BODY_HEIGHT - 0.25) * s;
-    item.mouthMeshes.forEach((m) => (m.position.y = MOUTH_DROP * s)); // thân thấp đi thì miệng gần kính hơn
-    item.sprite.position.y = BODY_HEIGHT * s + 0.35;
+    this.applySeated(item);
+  }
+
+  applySeated(item) {
+    const s = item.seated ? SEATED_SQUASH : 1;
+    item.hands.setScale(item.fruit.hands.scale * s);
+    item.sprite.position.y = item.fruit.top * s + 0.3;
+    if (item.stars) item.stars.position.y = item.fruit.top * s + 0.1;
   }
 
   // Hành động của avatar: 'clap' | 'confetti' | 'heart' (bắn một lần), cầm/cất lightstick, vung tay tát, dừng hết
@@ -196,10 +191,14 @@ export class Avatars {
 
   // Cầm / cất một thứ: type 'lightstick' hoặc 'eat' (bát và đũa)
   setHolding(id, type, on) {
-    const hands = this.items.get(id)?.hands;
-    if (!hands) return;
-    if (type === 'lightstick') hands.setHolding(on);
-    else if (type === 'eat') hands.setEating(on);
+    const item = this.items.get(id);
+    if (!item) return;
+    if (type === 'lightstick') {
+      item.dancing = on; // cầm lightstick thì nhún nhảy theo nhịp
+      item.hands.setHolding(on);
+    } else if (type === 'eat') {
+      item.hands.setEating(on);
+    }
   }
 
   swing(id) {
@@ -210,13 +209,13 @@ export class Avatars {
     this.items.get(id)?.hands.cancel();
   }
 
-  // Đang nói thì thân avatar phát sáng nhẹ
+  // Đang nói thì thân avatar phát sáng hơn
   setSpeaking(id, speaking) {
     const item = this.items.get(id);
     if (!item) return;
     item.speaking = speaking;
-    item.body.material.emissive.set(speaking ? item.body.material.color : 0x000000);
-    item.body.material.emissiveIntensity = speaking ? 0.9 : 0;
+    const mat = item.fruit.bodyMat;
+    mat.emissiveIntensity = speaking ? 0.9 : BASE_GLOW;
   }
 
   setTarget(id, { x, y, z, ry }) {
@@ -230,13 +229,10 @@ export class Avatars {
     if (item.stars) item.group.remove(item.stars); // vật liệu sao dùng chung, không được huỷ theo avatar
     item.hands.dispose(); // tay dùng hình/vật liệu chung, tách ra trước khi dọn dẹp bên dưới
     this.scene.remove(item.group);
-    item.group.traverse((o) => {
-      o.geometry?.dispose();
-      if (o.material) {
-        o.material.map?.dispose();
-        o.material.dispose();
-      }
-    });
+    item.fruit.dispose();
+    // hình khối của thân dùng chung giữa các avatar; chỉ huỷ phần riêng (nhãn tên)
+    item.sprite.material.map?.dispose();
+    item.sprite.material.dispose();
     this.items.delete(id);
   }
 
@@ -280,10 +276,9 @@ export class Avatars {
       const walking = !item.seated && moved < 1.5 && moved / Math.max(dt, 1e-3) > MIN_WALK_SPEED;
       item.walkAmp += ((walking ? 1 : 0) - item.walkAmp) * Math.min(1, dt * 12);
       if (walking) item.walkPhase += (moved / (2 * STEP_LENGTH)) * Math.PI * 2; // hai bước (mỗi chân một bước) = một vòng
-      item.feet.forEach((foot, i) => {
-        const phase = item.walkPhase + i * Math.PI; // hai chân lệch pha nhau
-        foot.position.z = FOOT_REST_Z - Math.sin(phase) * FOOT_SWING * item.walkAmp;
-        foot.position.y = FOOT_SIZE[1] / 2 + Math.max(0, Math.cos(phase)) * FOOT_LIFT * item.walkAmp;
+      item.fruit.pose({
+        dt, time: now / 1000, walkPhase: item.walkPhase, walkAmp: item.walkAmp,
+        seated: item.seated, stunned: item.stunned, dancing: item.dancing,
       });
 
       if (item.seated || moved > 1.5) {

@@ -15,9 +15,9 @@ const AMBIENT_INTENSITY = 0.3;
 const WALL_PHOTO_URL = '/wall-photo.jpg';
 const WALL_PHOTO_HEIGHT = 1.96; // m; chiều rộng tính theo tỉ lệ ảnh. Bằng nửa kích cỡ lúc treo trên trần (~3.9 m)
 
-// Bảng chỉnh âm mic hát: treo sát tường sau, ngay dưới bức ảnh (tâm cao 2.65 m, sàn chỗ đó cao 1.2 m nên ngang tầm mắt).
+// Bảng chỉnh âm mic hát: treo sát tường sau, ngay dưới bức ảnh (tâm cao 2.2 m, sàn chỗ đó cao 1.2 m nên ngang tầm mắt).
 // Đứng trong MIXER.reach (m) trước bảng thì nhấn E mở bảng chỉnh (giao diện ở main.js / index.html).
-export const MIXER = { x: 0, z: ROOM.maxZ - 0.06, y: 2.65, width: 1.7, height: 1.0, reach: 2.2 };
+export const MIXER = { x: 0, z: ROOM.maxZ - 0.06, y: 2.3, width: 1.7, height: 1.0, reach: 2.2 };
 
 // Đèn sân khấu: mỗi sân khấu có một đèn treo ngay trên đầu người hát, chỉ sáng khi có người hát (setStageLight).
 // Gồm chùm sáng hình nón + vòng sáng tròn trên sàn sân khấu (giả bằng hình trong suốt cộng sáng, rất nhẹ);
@@ -50,10 +50,10 @@ const STAGE_HEIGHT = 0.5;
 // Màn hình karaoke (nhắc lời) ở mỗi sân khấu: đặt trước mặt người hát, cao ~65% chiều cao người (1.6 m) tính cả chân,
 // quay mặt về phía người hát và ngả ra sau cho mặt hướng thẳng vào mắt họ (không phải ngẩng/cúi quá).
 // Cỡ ~32 inch (0.71 x 0.40 m): đứng cách ~1.1 m thì chiếm khoảng 1/3 chiều ngang tầm nhìn, đủ to để đọc lời.
-const PLAYER_EYE_HEIGHT = 1.6; // khớp EYE_HEIGHT trong main.js
+const PLAYER_EYE_HEIGHT = 1.0; // khớp EYE_HEIGHT trong main.js
 const MONITOR_WIDTH = 0.71;
 const MONITOR_HEIGHT = 0.4;
-const MONITOR_CENTER_Y = 0.85; // tâm màn hình cao hơn mặt sân khấu; mép trên ~1.05 m = 65% chiều cao người
+const MONITOR_CENTER_Y = 0.53; // tâm màn hình cao hơn mặt sân khấu; mép trên ~0.68 m = 75% chiều cao mắt người hát
 const MONITOR_DISTANCE = 0.95; // m, từ chỗ người hát ra phía khán giả
 // Màn hình đặt lệch sang bên (về phía giữa phòng) để cột mic, nằm thẳng giữa mắt người hát và màn hình, không che.
 // Lệch 0.55 m thì cột mic cách mép trong màn hình gần 5 cm theo đường nhìn (kiểm tra bằng tính toán hình học).
@@ -324,7 +324,7 @@ export function buildCinema(scene, { lowQuality = false } = {}) {
   const wooferGeo = new THREE.CylinderGeometry(0.2, 0.2, 0.03, 20).rotateX(Math.PI / 2); // trục hướng về +z (phía khán giả)
   const tweeterGeo = new THREE.CylinderGeometry(0.07, 0.07, 0.03, 16).rotateX(Math.PI / 2);
   const micBaseGeo = new THREE.CylinderGeometry(0.14, 0.16, 0.03, 20);
-  const micPoleGeo = new THREE.CylinderGeometry(0.012, 0.012, 1.4, 8);
+  const micPoleGeo = new THREE.CylinderGeometry(0.012, 0.012, 0.95, 8);
   const micHeadGeo = new THREE.SphereGeometry(0.045, 12, 8);
   const addMesh = (geo, mat, x, y, z) => {
     const mesh = new THREE.Mesh(geo, mat);
@@ -349,8 +349,8 @@ export function buildCinema(scene, { lowQuality = false } = {}) {
 
     // mic đứng: đế, cột, đầu mic
     addMesh(micBaseGeo, micMat, s.micX, top + 0.015, s.micZ);
-    addMesh(micPoleGeo, micMat, s.micX, top + 0.03 + 0.7, s.micZ);
-    addMesh(micHeadGeo, micHeadMat, s.micX, top + 1.46, s.micZ);
+    addMesh(micPoleGeo, micMat, s.micX, top + 0.03 + 0.475, s.micZ);
+    addMesh(micHeadGeo, micHeadMat, s.micX, top + 1.01, s.micZ);
 
     // 2 loa ở 2 góc phía khán giả: thùng loa, loa trầm (to) và loa treble (nhỏ) hướng ra phòng
     for (const side of [-1, 1]) {

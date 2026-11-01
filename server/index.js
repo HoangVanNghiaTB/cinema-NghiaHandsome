@@ -5,6 +5,7 @@ import path from 'path';
 import express from 'express';
 import { Server } from 'socket.io';
 import { MIX_PARAMS, MIX_DEFAULTS, cleanMixValue } from '../client/src/audio/mixParams.js';
+import { cleanLook } from '../client/src/scene/looks.js';
 
 const PORT = process.env.PORT || 3000;
 const MAX_PLAYERS = 10;
@@ -98,6 +99,7 @@ io.on('connection', (socket) => {
       id: socket.id,
       name: cleanName(data.name),
       color: cleanColor(data.color),
+      look: cleanLook(data.look), // phụ kiện + màu áo (xem client/src/scene/looks.js)
       x: 0,
       y: 0,
       z: -4,
@@ -234,6 +236,14 @@ io.on('connection', (socket) => {
   socket.on('signal', (msg = {}) => {
     if (!players.has(socket.id) || !players.has(msg.to)) return;
     io.to(msg.to).emit('signal', { from: socket.id, data: msg.data });
+  });
+
+  // Đổi phụ kiện / màu áo giữa chừng (menu); chuyển cho những người còn lại
+  socket.on('look', (data = {}) => {
+    const p = players.get(socket.id);
+    if (!p) return;
+    p.look = cleanLook(data.look);
+    socket.broadcast.emit('look-update', { id: p.id, look: p.look });
   });
 
   // Bảng chỉnh âm: ai trong phòng cũng chỉnh được; server kiểm tra giá trị rồi chuyển cho những người còn lại

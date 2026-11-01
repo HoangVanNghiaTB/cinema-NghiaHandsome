@@ -65,6 +65,12 @@
       #mixer button { font-size: 14px; padding: 8px 14px; cursor: pointer; }
       #login { z-index: 20; background: #000; }
       #menu button, #login button { font-size: 16px; padding: 10px 20px; cursor: pointer; }
+      #menu #look-menu { display: flex; flex-direction: column; align-items: center; gap: 6px; max-width: 92vw; }
+      #menu #look-selects { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 14px; font-size: 13px; }
+      #menu #look-selects select { margin-left: 6px; font-size: 13px; padding: 3px; }
+      #menu #shirt-swatches { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; align-items: center; font-size: 13px; }
+      #menu .swatch { width: 26px; height: 26px; padding: 0; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.4); cursor: pointer; font-size: 14px; line-height: 1; }
+      #menu .swatch.on { border-color: #fff; box-shadow: 0 0 0 2px #0a8a4a; }
       #menu #enter { font-size: 20px; padding: 12px 28px; }
       #menu .row, #login .row { display: flex; gap: 8px; align-items: center; }
       #menu input[type="text"], #login input[type="text"] { width: 380px; max-width: 80vw; font-size: 16px; padding: 10px; }
@@ -330,6 +336,11 @@
           <option value="high">Cao</option>
         </select>
       </div>
+      <div id="look-menu">
+        <b>Nhân vật</b>
+        <div id="look-selects"></div>
+        <div id="shirt-swatches"><span>Màu thân:</span></div>
+      </div>
       <div class="sliders">
         <label for="vol-video">Âm lượng video</label>
         <input type="range" id="vol-video" min="0" max="100" value="100" />
@@ -345,7 +356,7 @@
         <label><input type="checkbox" id="show-fps" /> Hiện FPS</label>
       </div>
       <div id="msg"></div>
-      <small id="hint">WASD để đi, chuột để nhìn, M để bật/tắt mic, E để ngồi/đứng/hát (gần ghế hoặc sân khấu), chuột trái hoặc F để đánh, phím 1 vỗ tay · 2 pháo giấy · 3 lightstick · 4 trái tim · 5 ăn cơm (bấm lại để thôi), V đổi góc nhìn 1/3 (góc 3: giữ Alt để xoay mắt nhìn quanh nhân vật), Enter để chat, Esc để mở menu này</small>
+      <small id="hint">WASD để đi, chuột để nhìn, M để bật/tắt mic, E để ngồi/đứng/hát (gần ghế hoặc sân khấu), chuột trái hoặc F để đánh, phím 1 vỗ tay · 2 pháo giấy · 3 lightstick · 4 trái tim · 5 ăn cơm (bấm lại để thôi), V đổi góc nhìn 1/3 (góc 3: bấm Alt để xoay mắt nhìn quanh nhân vật, bấm Alt lần nữa để về sau lưng), Enter để chat, Esc để mở menu này</small>
     </div>
     <script type="module" src="/src/main.js"></script>
   </body>

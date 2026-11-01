@@ -12,6 +12,7 @@ import { AvatarHands } from './scene/avatarHands.js';
 import { createSounds, STEP_LENGTH } from './audio/sounds.js';
 import { createYouTubePlayer, parseVideoId } from './player/youtube.js';
 import { Avatars } from './scene/avatars.js';
+import { LOOK_OPTIONS, LOOK_LABELS, SHIRT_COLORS, cleanLook } from './scene/looks.js';
 import { connectToRoom } from './net/socket.js';
 import { createVoice } from './net/voice.js';
 
@@ -22,7 +23,7 @@ const isTouch = matchMedia('(pointer: coarse)').matches;
 if (isTouch) document.body.classList.add('touch');
 
 const camera = new THREE.PerspectiveCamera(70, viewW() / viewH(), 0.1, 100);
-camera.position.set(0, 1.6, -4);
+camera.position.set(0, 1.0, -4);
 camera.rotation.order = 'YXZ'; // rotation.y là góc quay ngang thật sự, kể cả khi ngước/cúi
 scene.add(camera); // để các vật gắn vào camera (vòng sao choáng) được vẽ
 const sounds = createSounds(camera); // tiếng bước chân, tiếng tát; camera là "tai" người nghe
@@ -275,12 +276,12 @@ const SELF = 'me';
 // Góc nhìn thứ 3 dùng được khi đứng và khi ngồi; hát thì tự về góc nhìn thứ nhất (lựa chọn vẫn được nhớ)
 let thirdPersonPref = false;
 const isThirdPerson = () => thirdPersonPref && myStage === null;
-const THIRD_DISTANCE = 2.8;
-const THIRD_DISTANCE_SEATED = 1.6; // ngồi thì camera gần hơn: ở giữa hàng ghế mình và hàng ghế phía sau, không chui vào ghế khác
+const THIRD_DISTANCE = 2.2;
+const THIRD_DISTANCE_SEATED = 1.4; // ngồi thì camera gần hơn: ở giữa hàng ghế mình và hàng ghế phía sau, không chui vào ghế khác
 const THIRD_PIVOT_DROP = 0.1; // m: tâm xoay thấp hơn mắt một chút (ngang đầu/cổ nhân vật)
 const thirdDir = new THREE.Vector3();
 // "Con mắt" kiểu PUBG (chỉ ở góc nhìn thứ 3): xoay camera quanh nhân vật mà không quay người, để nhìn mặt trước.
-// Máy tính giữ phím Alt; điện thoại bấm nút con mắt để bật/tắt. Tắt thì camera về lại sau lưng.
+// Máy tính bấm Alt để bật/tắt; điện thoại bấm nút con mắt để bật/tắt. Tắt thì camera về lại sau lưng.
 let freeLook = false;
 let freeYaw = 0;
 let freePitch = 0;
@@ -395,6 +396,56 @@ chatInput.addEventListener('keydown', (e) => {
   else if (e.key === 'Escape') endChat(false);
 });
 
+// Phụ kiện + màu áo của mình (chọn ở menu, nhớ cho lần sau, mọi người cùng thấy)
+const LOOK_KEY = 'cinema-look';
+let myLook = cleanLook(null);
+try {
+  myLook = cleanLook(JSON.parse(localStorage.getItem(LOOK_KEY)));
+} catch {
+  // không đọc được thì dùng mặc định
+}
+function buildLookMenu() {
+  const selects = $('look-selects');
+  for (const key of Object.keys(LOOK_OPTIONS)) {
+    const label = document.createElement('label');
+    label.textContent = LOOK_LABELS[key];
+    const select = document.createElement('select');
+    for (const [id, text] of LOOK_OPTIONS[key]) select.add(new Option(text, id));
+    select.value = myLook[key];
+    select.addEventListener('change', () => changeLook({ [key]: select.value }));
+    label.appendChild(select);
+    selects.appendChild(label);
+  }
+  const swatches = $('shirt-swatches');
+  for (const color of SHIRT_COLORS) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'swatch';
+    b.title = color === 'same' ? 'Áo cùng màu đầu' : 'Màu áo';
+    if (color === 'same') b.textContent = '\u21BA';
+    else b.style.background = color;
+    b.addEventListener('click', () => changeLook({ shirt: color }));
+    b.dataset.color = color;
+    swatches.appendChild(b);
+  }
+  markShirt();
+}
+function markShirt() {
+  for (const b of $('shirt-swatches').children) b.classList.toggle('on', b.dataset.color === myLook.shirt);
+}
+function changeLook(patch) {
+  myLook = cleanLook({ ...myLook, ...patch });
+  try {
+    localStorage.setItem(LOOK_KEY, JSON.stringify(myLook));
+  } catch {
+    // không lưu được thì thôi
+  }
+  markShirt();
+  selfAvatar.setLook(SELF, myLook);
+  room?.setLook(myLook);
+}
+buildLookMenu();
+
 // Mạng
 let room = null;
 const setNetStatus = (text) => ($('net').textContent = text);
@@ -402,8 +453,8 @@ const setNetStatus = (text) => ($('net').textContent = text);
 function joinRoom(profile) {
   fpEat.setEating(false);
   selfAvatar.remove(SELF);
-  selfAvatar.add({ id: SELF, name: profile.name, color: profile.color });
-  room = connectToRoom(profile, {
+  selfAvatar.add({ id: SELF, name: profile.name, color: profile.color, look: myLook });
+  room = connectToRoom({ ...profile, look: myLook }, {
     onInit: (id, others, video, iceServers, mix) => {
       myId = id;
       setMix(mix ?? MIX_DEFAULTS);
@@ -427,6 +478,7 @@ function joinRoom(profile) {
     },
     onVideo: setDesired,
     onMix: setMix,
+    onLook: ({ id, look }) => avatars.setLook(id, look),
     onJoin: (p) => {
       avatars.add(p);
       names.set(p.id, p.name);
@@ -589,7 +641,7 @@ login.addEventListener('submit', (e) => {
 // Ngồi ghế: đứng gần ghế trống thì ngồi được (phím E, hoặc nút "Ngồi" trên điện thoại).
 // Server quyết định ghế có trống không; client chỉ dời camera sau khi server xác nhận.
 const SEAT_REACH = 1.4; // m: cách ghế trong khoảng này mới ngồi được
-const SEATED_EYE_HEIGHT = 0.75; // mắt cao hơn mặt nệm
+const SEATED_EYE_HEIGHT = 0.7; // mắt cao hơn mặt nệm (thân mập ngồi cao ~0.9 m)
 const STAND_OFFSET = 1.2; // đứng dậy thì bước ra phía trước ghế chừng này
 const seatOwners = new Map(); // chỉ số ghế -> id người đang ngồi
 let mySeat = null; // ghế mình đang ngồi (đã được server xác nhận)
@@ -1040,7 +1092,7 @@ addEventListener('keydown', (e) => {
   if (!controls.isLocked) return;
   if (e.code === 'AltLeft' || e.code === 'AltRight') {
     e.preventDefault(); // Alt không được mở menu của trình duyệt
-    if (isThirdPerson()) setFreeLook(true);
+    if (!e.repeat && isThirdPerson()) setFreeLook(!freeLook); // bấm Alt: xoay ra trước mặt, bấm lần nữa: về sau lưng
     return;
   }
   if (e.code === 'KeyM' && !e.repeat) toggleMic();
@@ -1053,9 +1105,7 @@ addEventListener('keydown', (e) => {
 });
 addEventListener('keyup', (e) => {
   keys.delete(e.code);
-  if (e.code === 'AltLeft' || e.code === 'AltRight') setFreeLook(false);
 });
-addEventListener('blur', () => setFreeLook(false)); // chuyển cửa sổ lúc đang giữ Alt thì không bị kẹt
 addEventListener('mousemove', (e) => {
   if (freeLook && controls.isLocked) freeLookBy(e.movementX, e.movementY, 0.002);
 });
@@ -1066,8 +1116,8 @@ addEventListener('mousedown', (e) => {
 if (isTouch) $('hint').textContent = 'Cần gạt bên trái để đi, kéo bên phải để nhìn quanh. Dùng các nút ở góc để ngồi, chat, mic.';
 
 const SPEED = 4;
-const PLAYER_RADIUS = 0.25; // m: bề rộng thân khi va chạm với ghế, loa...
-const EYE_HEIGHT = 1.6;
+const PLAYER_RADIUS = 0.38; // m: bề rộng thân tròn mập khi va chạm với ghế, loa...
+const EYE_HEIGHT = 1.0; // mắt cao ngang mặt nhân vật trái cây (thân mập cao ~1.1 m)
 const clock = new THREE.Clock();
 const SEND_INTERVAL = 1 / 15;
 let sendTimer = 0;

@@ -102,6 +102,8 @@ export class AvatarHands {
 
     this.color = new THREE.Color(color);
     this.s = 1; // tỉ lệ chiều cao thân (ngồi thì nhỏ hơn)
+    this.restX = 0.37; // tay buông cách giữa thân bao xa
+    this.forward = 0; // đẩy mọi tư thế ra trước thêm (thân mập)
     this.action = null; // { type, start, duration }
     this.swingStart = null; // lúc bắt đầu một cú tát
     this.stick = null; // { group, mats } khi đang cầm lightstick (ở tay trái)
@@ -112,6 +114,24 @@ export class AvatarHands {
 
   setScale(s) {
     this.s = s;
+  }
+
+  // Đổi màu tay của avatar này (tay dùng chung vật liệu nên tách ra một bản riêng ở lần đầu)
+  setSkin(color) {
+    if (this.viewmodel) return;
+    if (!this.ownHandMat) {
+      this.ownHandMat = new THREE.MeshLambertMaterial({ color });
+      this.mats = { ...this.mats, hand: this.ownHandMat };
+      this.left.material = this.right.material = this.ownHandMat;
+    } else {
+      this.ownHandMat.color.set(color);
+    }
+  }
+
+  // Thân to tròn thì tay phải nằm ngoài thân: restX = tay buông cách giữa thân bao xa, forward = đẩy mọi tư thế ra trước thêm
+  setReach({ restX, forward }) {
+    this.restX = restX;
+    this.forward = forward;
   }
 
   // Cầm / cất lightstick (tay trái), sáng theo màu avatar, không dùng đèn thật nên rất nhẹ
@@ -262,10 +282,10 @@ export class AvatarHands {
     const R = this.right.position;
 
     // tư thế nghỉ: hai tay buông bên hông; cầm lightstick thì tay trái giơ lên ở bên
-    L.set(-0.37, 0.5 * H, 0);
-    R.set(0.37, 0.5 * H, 0);
+    L.set(-this.restX, 0.5 * H, 0);
+    R.set(this.restX, 0.5 * H, 0);
     if (this.stick) {
-      L.set(-0.42, 0.8 * H, -0.12);
+      L.set(-(this.restX + 0.05), 0.8 * H, -0.12);
       const t = now * 0.001;
       this.stick.group.rotation.z = 0.25 + Math.sin(t * Math.PI * 2 * 1.6) * 0.35; // đung đưa
       this.stick.group.rotation.x = Math.sin(t * Math.PI * 2 * 0.8) * 0.15;
@@ -283,8 +303,8 @@ export class AvatarHands {
         // hai tay chụm vào rồi tách ra trước ngực
         const open = (Math.cos((t / 1000) * CLAP_HZ * Math.PI * 2) + 1) / 2;
         const x = 0.04 + 0.2 * open;
-        L.set(-x, 0.68 * H, -0.32);
-        R.set(x, 0.68 * H, -0.32);
+        L.set(-x, 0.56 * H, -0.36); // ngang ngực, dưới đầu và cách mặt một khoảng
+        R.set(x, 0.56 * H, -0.36);
       } else if (a.type === 'confetti') {
         // hai tay hất lên trên đầu (lúc pháo bắn lên)
         const e = easeOut(Math.min(1, t / a.duration));
@@ -313,11 +333,13 @@ export class AvatarHands {
         const strike = 0.4; // tới đích ở 40% thời gian, phần còn lại thu về
         const k = u < strike ? easeOut(u / strike) : 1 - easeInOut((u - strike) / (1 - strike));
         R.set(
-          lerp(0.37, -0.1, k),
+          lerp(this.restX, -0.1, k),
           lerp(0.5 * H, 0.72 * H, k) + 0.1 * Math.sin(Math.PI * k),
           lerp(0, -0.78, k)
         );
       }
     }
+    L.z -= this.forward;
+    R.z -= this.forward;
   }
 }

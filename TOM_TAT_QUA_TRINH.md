@@ -101,3 +101,9 @@ Muốn đưa lên bản Render thì commit và push, Render sẽ tự build lạ
 - Tiếng "bụp" cho pháo giấy nếu có file âm thanh.
 - Thấy hiệu ứng hành động của chính mình (hiện chỉ người khác thấy).
 - Lưu trạng thái phòng ra ngoài RAM (hiện server ngủ hoặc khởi động lại là mất phòng và video).
+
+## Nhân vật trái cây + phụ kiện
+- Nhân vật kiểu hoạt hình robot trái cây: thân tròn mập mặc áo màu trái cây, mặt hồng nhô ra như cửa sổ (mắt trắng đồng tử đen, lông mày cau, má hồng, miệng tròn/vuông/"-" đổi khi nói), tay chân bé xíu, lá/cuống trên đầu. Không dùng file mô hình: toàn hình học đơn giản (`client/src/scene/fruitRig.js`), động tác là co giãn/lắc theo thời gian (đi nhún, nhảy khi cầm lightstick, lắc khi choáng, thở nhẹ, chớp mắt). Hai tay là hai quả cầu lơ lửng của `AvatarHands` (các hành động cũ vẫn chạy).
+- Loại trái (táo, cam, chuối, dâu, nho, đào, chanh xanh; dâu có hạt), mũ, kính, tai nghe/tai mèo, balo/cánh/đuôi, màu thân: `looks.js` (dữ liệu, server cũng dùng để kiểm tra), `accessories.js` (dựng hình). Chọn ở menu (mục "Nhân vật"), lưu localStorage `cinema-look`, gửi qua server (`look` / `look-update`). Chọn trái thì thân đổi màu theo trái; chọn "Màu thân" thì đè lên.
+- Thân cao ~1.1 m nên mắt hạ xuống `EYE_HEIGHT = 0.9` (ngồi `SEATED_EYE_HEIGHT = 0.65`), bán kính va chạm `PLAYER_RADIUS = 0.38`; mic sân khấu, màn karaoke, bảng chỉnh âm hạ theo. (Trước đó đã thử robot RobotExpressive CC0 dạng xương, đã bỏ.)
+- 4 kiểu nhân vật (`KINDS` trong `looks.js`): mập mặt nam, mập mặt nữ (mắt to có mi, má hồng đậm, môi hồng, nơ), gầy đầu tròn mặt nam (tóc ngắn), gầy đầu tròn mặt nữ (tóc có hai búi). Chọn ở menu mục "Kiểu"; đổi kiểu thì dựng lại thân (`Avatars.build`). Thân được nâng lên khỏi sàn, mỗi chân là một nhóm xoay quanh hông (bàn chân bé xíu, vung khi đi). Miệng im là nụ cười cong, nói thì đổi tròn / vuông / "-". Mắt người chơi `EYE_HEIGHT = 1.0`, ngồi `0.7`.

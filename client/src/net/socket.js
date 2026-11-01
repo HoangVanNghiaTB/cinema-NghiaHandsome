@@ -7,17 +7,18 @@ const SERVER_URL = import.meta.env.DEV ? `http://${location.hostname}:3000` : un
 //             onStatus(connected), onVideo({ videoId, playing, position }), onSignal(from, data),
 //             onChat({ id, name, text }), onSeat({ id, seat }), onSeatDenied(),
 //             onStun({ id, by, duration }), onStage({ id, stage }), onStageDenied(),
-//             onEmote({ id, type, on? }), onSwing({ id }), onMix(params) }
-export function connectToRoom({ name, color }, handlers) {
+//             onEmote({ id, type, on? }), onSwing({ id }), onMix(params), onLook({ id, look }) }
+export function connectToRoom({ name, color, look }, handlers) {
   const socket = io(SERVER_URL);
 
   socket.on('connect', () => {
     handlers.onStatus?.(true);
-    socket.emit('join', { name, color });
+    socket.emit('join', { name, color, look });
   });
   socket.on('disconnect', () => handlers.onStatus?.(false));
   socket.on('init', ({ id, players, video, iceServers, mix }) => handlers.onInit?.(id, players, video, iceServers, mix));
   socket.on('mix-state', (m) => handlers.onMix?.(m));
+  socket.on('look-update', (d) => handlers.onLook?.(d));
   socket.on('video-state', (v) => handlers.onVideo?.(v));
   socket.on('signal', ({ from, data }) => handlers.onSignal?.(from, data));
   socket.on('chat', (m) => handlers.onChat?.(m));
@@ -42,6 +43,7 @@ export function connectToRoom({ name, color }, handlers) {
     sit: (seat) => socket.emit('sit', { seat }),
     stand: () => socket.emit('stand'),
     sendChat: (text) => socket.emit('chat', { text }),
+    setLook: (look) => socket.emit('look', { look }),
     setMix: (key, value) => socket.emit('mix-set', { key, value }),
     resetMix: () => socket.emit('mix-reset'),
     close: () => socket.close(),

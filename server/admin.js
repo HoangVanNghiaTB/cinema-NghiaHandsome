@@ -184,6 +184,11 @@ export function createAdmin(app, { rooms, settings, bans, clientIp }) {
     note(`${b.op === 'spawn' ? 'Thả rác' : 'Dọn rác'} phòng ${r.cfg.name}`);
   }));
   router.post('/settings', act((b) => {
+    if (b.startPoints !== undefined) {
+      settings.startPoints = Math.floor(clamp(b.startPoints, 0, 100000));
+      note(`Điểm khi mới vào: ${settings.startPoints}`);
+    }
+    if (b.trashEnabled === undefined && b.trashEverySec === undefined && b.trashMax === undefined) return;
     const t = settings.trash;
     if (typeof b.trashEnabled === 'boolean') t.enabled = b.trashEnabled;
     if (b.trashEverySec !== undefined) t.everyMs = clamp(b.trashEverySec, 10, 600) * 1000;

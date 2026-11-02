@@ -13,7 +13,7 @@ import { createGames } from './games.js';
 import { createWallet } from './wallet.js';
 import { createTrash } from './trash.js';
 import { createAdmin } from './admin.js';
-import { TRASH_EVERY_MS, TRASH_MAX } from '../client/src/economy.js';
+import { START_POINTS, TRASH_EVERY_MS, TRASH_MAX } from '../client/src/economy.js';
 
 const PORT = process.env.PORT || 3000;
 const SEAT_COUNT = 18; // phải khớp SEATS.length ở client/src/scene/cinema.js
@@ -46,7 +46,7 @@ if (process.env.TURN_URL) {
 const app = express();
 
 // Cài đặt chỉnh được lúc đang chạy qua trang admin (server/admin.js); khởi động lại thì về mặc định
-const settings = { trash: { enabled: true, everyMs: TRASH_EVERY_MS, max: TRASH_MAX } };
+const settings = { startPoints: START_POINTS, trash: { enabled: true, everyMs: TRASH_EVERY_MS, max: TRASH_MAX } };
 
 // Cấm vào: khoá `cid:<clientId>` hoặc `ip:<địa chỉ>` -> thời điểm hết cấm (Infinity = tới khi server khởi động lại)
 const bans = new Map();
@@ -86,7 +86,7 @@ function createRoom(nsp, cfg) {
   const players = new Map();
 
   // Điểm của rạp (xem server/wallet.js) và mini game treo tường (xem server/games.js)
-  const wallet = createWallet(nsp, players);
+  const wallet = createWallet(nsp, players, () => settings.startPoints);
   const games = createGames(nsp, players, wallet);
   const trash = createTrash(nsp, players, wallet, settings.trash); // rác rơi trong rạp, nhặt để lấy điểm (server/trash.js)
 

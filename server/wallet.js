@@ -1,13 +1,13 @@
 // Ví điểm của rạp. Mỗi người chơi có một tài khoản (khoá bằng clientId lưu ở trình duyệt, nên tải lại trang không được
 // phát lại 500 điểm), gồm số điểm và các phụ kiện đã mua. Dữ liệu chỉ nằm trong bộ nhớ, xoá khi phòng trống lâu (index.js).
-import { START_POINTS } from '../client/src/economy.js';
 import { ITEM_PRICES, LOOK_OPTIONS, itemKey } from '../client/src/scene/looks.js';
 
-export function createWallet(io, players) {
+// startPts: hàm trả số điểm tặng người mới vào (admin chỉnh được lúc đang chạy), chỉ áp cho tài khoản tạo sau đó
+export function createWallet(io, players, startPts) {
   let accounts = new Map(); // cid -> { pts, owned: Set<itemKey> }
   const account = (cid) => {
     let a = accounts.get(cid);
-    if (!a) accounts.set(cid, (a = { pts: START_POINTS, owned: new Set() }));
+    if (!a) accounts.set(cid, (a = { pts: startPts(), owned: new Set() }));
     return a;
   };
   const snapshot = (cid) => {

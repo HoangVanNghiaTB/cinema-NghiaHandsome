@@ -114,6 +114,7 @@ function renderServer() {
   const total = state.rooms.reduce((n, r) => n + r.players.length, 0);
   const everyIn = h('input', { type: 'number', min: 1, max: 14, value: Math.round(k.everyMs / 60000) });
   const tEvery = h('input', { type: 'number', min: 10, max: 600, value: Math.round(t.everyMs / 1000) });
+  const startIn = h('input', { type: 'number', min: 0, max: 100000, value: state.settings.startPoints });
   const tMax = h('input', { type: 'number', min: 1, max: 20, value: t.max });
   return h('div', { class: 'card' },
     h('h2', {}, 'Server'),
@@ -140,6 +141,12 @@ function renderServer() {
       : h('div', { class: 'dim' }, 'Chưa có địa chỉ để tự ping (Render tự cấp RENDER_EXTERNAL_URL; chạy máy nhà thì đặt KEEPALIVE_URL). Vẫn dùng được dịch vụ ping ngoài.'),
     h('div', { class: 'dim', style: 'margin-top:8px' },
       'Tự ping chỉ giữ được khi server đang thức. Để chắc ăn, đặt thêm UptimeRobot hoặc cron-job.org gọi /healthz mỗi 5 phút: nó đánh thức được cả khi server đã ngủ.'),
+    h('h2', { style: 'margin-top:16px' }, 'Điểm khi mới vào'),
+    h('div', { class: 'row' },
+      ctl('Mỗi người mới được', startIn, h('span', {}, 'điểm')),
+      h('button', { onclick: () => run('settings', { startPoints: Number(startIn.value) }) }, 'Lưu'),
+    ),
+    h('div', { class: 'dim' }, 'Chỉ áp cho người vào lần đầu sau khi lưu. Người đã có tài khoản trong phòng giữ nguyên điểm (chỉnh riêng ở bảng người chơi).'),
     h('h2', { style: 'margin-top:16px' }, 'Rác'),
     h('div', { class: 'row' },
       h('button', { onclick: () => run('settings', { trashEnabled: !t.enabled }) }, t.enabled ? 'Đang bật (bấm để tắt)' : 'Đang tắt (bấm để bật)'),

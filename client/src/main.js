@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls.js';
 import { CSS3DRenderer, CSS3DObject } from 'three/examples/jsm/renderers/CSS3DRenderer.js';
 import { buildCinema, floorHeight, resolveCollisions, MIXER, ROOM, SCREEN, SEATS, STAGES } from './scene/cinema.js';
+import { GAME_PANELS, buildGamePanels } from './scene/gamePanels.js';
+import { createGameHost } from './games/index.js';
 import { MIX_DEFAULTS, MIX_GROUPS, MIX_PARAMS } from './audio/mixParams.js';
 import { createTouchControls } from './ui/touch.js';
 import { viewW, viewH } from './ui/viewport.js';
@@ -12,7 +14,8 @@ import { AvatarHands } from './scene/avatarHands.js';
 import { createSounds, STEP_LENGTH } from './audio/sounds.js';
 import { createYouTubePlayer, parseVideoId } from './player/youtube.js';
 import { Avatars } from './scene/avatars.js';
-import { LOOK_OPTIONS, LOOK_LABELS, SHIRT_COLORS, cleanLook } from './scene/looks.js';
+import { LOOK_OPTIONS, LOOK_LABELS, SHIRT_COLORS, ITEM_PRICES, itemKey, cleanLook } from './scene/looks.js';
+import { START_POINTS, SING_COST } from './economy.js';
 import { connectToRoom } from './net/socket.js';
 import { createVoice } from './net/voice.js';
 
@@ -77,6 +80,7 @@ const NO_CSS = new URLSearchParams(location.search).has('nocss');
 if (NO_CSS) document.getElementById('css-layer').style.display = 'none';
 
 const cinema = buildCinema(scene, { lowQuality });
+const gamePanels = buildGamePanels(scene); // tranh game trên tường (mở bằng E, xem openGame)
 const confetti = new Confetti(scene, { perBurst: lowQuality ? 24 : 40 }); // ít hạt hơn ở chế độ nhẹ
 const fpHand = new FirstPersonHand(camera); // bàn tay của mình khi tát
 const fpEat = new AvatarHands(camera, 0xffffff, { viewmodel: true }); // bát và đũa nhìn từ mắt mình khi ăn cơm (góc nhìn thứ nhất)
@@ -396,6 +400,25 @@ chatInput.addEventListener('keydown', (e) => {
   else if (e.key === 'Escape') endChat(false);
 });
 
+// Điểm của rạp + phụ kiện đã mua (server giữ, gửi qua sự kiện 'wallet'; xem server/wallet.js, ví ở phím P)
+let wallet = { pts: START_POINTS, owned: [] };
+function showToast(text, kind = '') {
+  const box = $('toasts');
+  const t = document.createElement('div');
+  t.className = `toast ${kind}`;
+  t.textContent = text;
+  box.appendChild(t);
+  while (box.children.length > 4) box.firstChild.remove();
+  setTimeout(() => t.remove(), 3500);
+}
+function setWallet(w) {
+  wallet = { pts: w.pts, owned: w.owned ?? [] };
+  $('points-n').textContent = String(wallet.pts);
+  refreshLookOptions();
+  gameHost.onWallet();
+  if (w.reason && w.delta) showToast(`${w.delta > 0 ? '+' : ''}${w.delta} điểm · ${w.reason}`, w.delta > 0 ? 'plus' : 'minus');
+}
+
 // Phụ kiện + màu áo của mình (chọn ở menu, nhớ cho lần sau, mọi người cùng thấy)
 const LOOK_KEY = 'cinema-look';
 let myLook = cleanLook(null);
@@ -404,6 +427,7 @@ try {
 } catch {
   // không đọc được thì dùng mặc định
 }
+const lookSelects = {}; // key -> <select>
 function buildLookMenu() {
   const selects = $('look-selects');
   for (const key of Object.keys(LOOK_OPTIONS)) {
@@ -412,6 +436,7 @@ function buildLookMenu() {
     const select = document.createElement('select');
     for (const [id, text] of LOOK_OPTIONS[key]) select.add(new Option(text, id));
     select.value = myLook[key];
+    lookSelects[key] = select;
     select.addEventListener('change', () => changeLook({ [key]: select.value }));
     label.appendChild(select);
     selects.appendChild(label);
@@ -429,6 +454,23 @@ function buildLookMenu() {
     swatches.appendChild(b);
   }
   markShirt();
+  refreshLookOptions();
+}
+// Phụ kiện chưa mua thì không chọn được (ghi kèm giá); mua ở ví (phím P). Gọi lại mỗi khi danh sách đã mua đổi.
+function refreshLookOptions() {
+  const owned = new Set(wallet.owned);
+  for (const slot of Object.keys(ITEM_PRICES)) {
+    const select = lookSelects[slot];
+    if (!select) continue;
+    for (const opt of select.options) {
+      if (opt.value === 'none') continue;
+      const has = owned.has(itemKey(slot, opt.value));
+      const base = LOOK_OPTIONS[slot].find(([id]) => id === opt.value)[1];
+      opt.disabled = !has;
+      opt.textContent = has ? base : `${base} (${ITEM_PRICES[slot][opt.value]} điểm)`;
+    }
+    select.value = myLook[slot];
+  }
 }
 function markShirt() {
   for (const b of $('shirt-swatches').children) b.classList.toggle('on', b.dataset.color === myLook.shirt);
@@ -455,14 +497,34 @@ function joinRoom(profile) {
   selfAvatar.remove(SELF);
   selfAvatar.add({ id: SELF, name: profile.name, color: profile.color, look: myLook });
   room = connectToRoom({ ...profile, look: myLook }, {
-    onInit: (id, others, video, iceServers, mix) => {
+    onInit: (id, others, video, iceServers, mix, games, self) => {
       myId = id;
+      closeGame(); // kết nối lại thì thoát game đang mở
+      if (self) {
+        setWallet(self.wallet);
+        // Server bỏ các phụ kiện chưa mua khỏi nhân vật của mình (lần đầu vào chỉ có nhân vật trơn)
+        const cleaned = cleanLook(self.look);
+        if (JSON.stringify(cleaned) !== JSON.stringify(myLook)) {
+          myLook = cleaned;
+          try {
+            localStorage.setItem(LOOK_KEY, JSON.stringify(myLook));
+          } catch {
+            // không lưu được thì thôi
+          }
+          refreshLookOptions();
+          selfAvatar.setLook(SELF, myLook);
+        }
+      }
       setMix(mix ?? MIX_DEFAULTS);
+      for (const [gameId, text] of Object.entries(games ?? {})) gamePanels.setBrief(gameId, text);
       names.clear();
       seatOwners.clear();
       stageOwners.clear();
+      paidSingers.clear();
       mySeat = null;
       myStage = null;
+      myStagePaid = false;
+      showSingPrompt(false);
       stopKaraoke();
       voice.stopSinging();
       others.forEach((p) => {
@@ -470,6 +532,7 @@ function joinRoom(profile) {
         names.set(p.id, p.name);
         if (p.seat !== null) seatOwners.set(p.seat, p.id);
         if (p.stage !== null) stageOwners.set(p.stage, p.id);
+        if (p.singPaid) paidSingers.add(p.id);
       });
       syncStageLights(); // vào giữa lúc có người đang hát thì đèn đã sáng sẵn
       voice.setRoster(id, others.map((p) => p.id), iceServers);
@@ -478,6 +541,10 @@ function joinRoom(profile) {
     },
     onVideo: setDesired,
     onMix: setMix,
+    onGameState: (d) => gameHost.onState(d),
+    onGameBrief: ({ game, text }) => gamePanels.setBrief(game, text),
+    onWallet: setWallet,
+    onNotice: ({ text }) => showToast(text),
     onLook: ({ id, look }) => avatars.setLook(id, look),
     onJoin: (p) => {
       avatars.add(p);
@@ -504,21 +571,33 @@ function joinRoom(profile) {
       }
     },
     onSeatDenied: () => addChatLine('Ghế này đã có người ngồi.', { system: true }),
-    onStage: ({ id, stage }) => {
+    onStage: ({ id, stage, paid }) => {
       for (const [index, owner] of stageOwners) if (owner === id) stageOwners.delete(index);
       if (stage !== null) stageOwners.set(stage, id);
-      syncStageLights();
+      if (stage !== null && paid) paidSingers.add(id);
+      else paidSingers.delete(id);
+      syncStageLights(); // lên sân khấu là đèn sáng, kể cả chưa trả điểm hát
       if (id !== myId) return;
       const previous = myStage;
       myStage = stage;
       if (stage !== null) {
-        micBeforeSing = micOn;
-        setMic(true); // hát thì bật mic
-        lookToward(STAGES[stage].ry); // quay mặt về phía khán giả
-        startKaraoke(stage); // màn hình nhắc lời trước mặt
-        voice.startSinging(); // mic hát: có echo, reverb... (khác mic voice thường)
+        if (previous === null) {
+          micBeforeSing = micOn;
+          lookToward(STAGES[stage].ry); // quay mặt về phía khán giả
+        }
+        if (!paid) {
+          showSingPrompt(true); // hỏi "dùng 50 điểm để vào hát?"
+        } else if (!myStagePaid) {
+          myStagePaid = true;
+          showSingPrompt(false);
+          setMic(true); // hát thì bật mic
+          startKaraoke(stage); // màn hình nhắc lời trước mặt
+          voice.startSinging(); // mic hát: có echo, reverb... (khác mic voice thường)
+        }
       } else if (previous !== null) {
-        // hát xong (hoặc bị đẩy khỏi sân khấu): bước xuống phía trước sân khấu, trả mic về như cũ
+        // hát xong (hoặc không trả điểm, bị đẩy khỏi sân khấu): bước xuống phía trước sân khấu, trả mic về như cũ
+        myStagePaid = false;
+        showSingPrompt(false);
         camera.position.x = STAGES[previous].spotX;
         camera.position.z = STAGES[previous].spotZ + 1.8;
         setMic(micBeforeSing);
@@ -562,6 +641,7 @@ function joinRoom(profile) {
       stunTimers.delete(id);
       for (const [index, owner] of seatOwners) if (owner === id) seatOwners.delete(index);
       for (const [index, owner] of stageOwners) if (owner === id) stageOwners.delete(index);
+      paidSingers.delete(id);
       syncStageLights(); // người đang hát rời phòng thì tắt đèn
       avatars.remove(id);
       voice.peerLeft(id);
@@ -583,9 +663,12 @@ function joinRoom(profile) {
         names.clear();
         seatOwners.clear();
         stageOwners.clear();
+        paidSingers.clear();
         syncStageLights();
         mySeat = null;
         myStage = null;
+        myStagePaid = false;
+        showSingPrompt(false);
         stopKaraoke();
         voice.stopSinging();
         stunUntil = 0;
@@ -672,7 +755,23 @@ const stageOwners = new Map(); // chỉ số sân khấu -> id người đang h�
 function syncStageLights() {
   STAGES.forEach((_, i) => cinema.setStageLight(i, stageOwners.has(i)));
 }
-let myStage = null; // sân khấu mình đang hát (đã được server xác nhận)
+let myStage = null; // sân khấu mình đang đứng (đã được server xác nhận)
+let myStagePaid = false; // đã trả điểm để hát chưa; chưa trả thì chưa bật mic hát
+const paidSingers = new Set(); // id những người đã trả điểm và đang hát (tiếng họ vang cả phòng)
+
+// Lên sân khấu (E) là đứng dưới đèn ngay, nhưng phải trả SING_COST điểm mới được hát: thông báo nhỏ ở mép trên màn hình, Y / N hoặc chạm nút
+const singPrompt = $('sing-prompt');
+const showSingPrompt = (show) => (singPrompt.style.display = show ? 'flex' : 'none');
+const singPromptOpen = () => singPrompt.style.display === 'flex';
+function answerSing(yes) {
+  if (!room || myStage === null || myStagePaid) return;
+  showSingPrompt(false);
+  if (yes) room.singPay();
+  else room.stopSing();
+}
+$('sing-yes').addEventListener('click', () => answerSing(true));
+$('sing-no').addEventListener('click', () => answerSing(false));
+$('sing-cost').textContent = String(SING_COST);
 let micBeforeSing = false; // trước khi hát mic đang bật hay tắt, để trả lại khi hát xong
 
 function nearestFreeStage() {
@@ -740,11 +839,11 @@ function stopKaraoke() {
   karaoke = null;
 }
 
-// Âm lượng giọng theo luật gần xa. Nghe to nhất trong VOICE_NEAR (vài ghế quanh mình);
+// Âm lượng giọng theo luật gần xa. Nghe to nhất trong VOICE_NEAR (khoảng 1 ghế quanh mình);
 // xa hơn thì nhỏ dần, và từ VOICE_FAR trở ra thì không nghe thấy gì. Người đang hát thì cả phòng nghe đều.
 const VOICE_MAX = 0.6; // 3/5 âm lượng ban đầu
-const VOICE_NEAR = 3.5; // trong khoảng này nghe ở mức tối đa (khoảng 3 ghế)
-const VOICE_FAR = 14; // từ khoảng này trở ra là im
+const VOICE_NEAR = 1.5; // trong khoảng này nghe ở mức tối đa (khoảng 1 ghế, ghế cách nhau 1 m)
+const VOICE_FAR = 7; // từ khoảng này trở ra là im (phòng dài 18 m nên đầu phòng không nghe được cuối phòng)
 // Âm lượng mic sân khấu (mặc định 3/4 mức tối đa), nghe đều cả phòng; chỉnh ở bảng âm thanh (thanh "Âm lượng mic hát")
 const stageMicVolume = () => mixState.level / 100;
 
@@ -754,7 +853,7 @@ function designVolume(singer, d) {
   const t = THREE.MathUtils.clamp((d - VOICE_NEAR) / (VOICE_FAR - VOICE_NEAR), 0, 1);
   return VOICE_MAX * (1 - t) ** 2; // giảm nhanh ở gần rồi nhỏ dần tới 0
 }
-const isSinger = (id) => [...stageOwners.values()].includes(id);
+const isSinger = (id) => paidSingers.has(id); // chỉ người đã trả điểm mới phát tiếng hát
 function distanceTo(id) {
   const avatar = avatars.items.get(id);
   if (!avatar) return Infinity;
@@ -763,7 +862,7 @@ function distanceTo(id) {
 // Âm lượng người `id` gửi cho mình (người nói tự hạ trước khi gửi), dùng để đo "đang nói" cho đúng
 const expectedVoiceGain = (id) => designVolume(isSinger(id), distanceTo(id));
 // Âm lượng mình gửi cho người `id`: gần/xa theo khoảng cách tới họ, hoặc 3/4 nếu mình đang hát
-const sendVoiceVolume = (id) => designVolume(myStage !== null, distanceTo(id));
+const sendVoiceVolume = (id) => designVolume(myStagePaid, distanceTo(id));
 // Hệ số mình tự áp dụng khi phát giọng người `id` (thanh "Âm lượng voice" trong menu, 0-100% so với mức thiết kế).
 // Nếu thiết bị người đó đã hạ âm lượng rồi ('gain') thì chỉ cần hệ số của mình; nếu họ gửi giọng gốc ('raw')
 // thì mình phải tự hạ theo khoảng cách như cách cũ.
@@ -883,6 +982,70 @@ addEventListener('keydown', (e) => {
   if (mixerOpen && (e.code === 'Escape' || e.code === 'KeyE')) closeMixer();
 });
 
+// Mini game treo tường: đứng gần tranh, nhấn E mở (giao diện trong client/src/games/)
+let gameOpen = false;
+const gameHost = createGameHost({
+  overlay: $('game'),
+  titleEl: $('game-title'),
+  bodyEl: $('game-body'),
+  net: () => room,
+  me: () => ({ id: myId }),
+  isTouch,
+  requestClose: () => closeGame(),
+  wallet: () => wallet,
+  extra: {
+    players: () => [...names].filter(([id]) => id !== myId).map(([id, name]) => ({ id, name, singing: paidSingers.has(id) })),
+    tip: (to, amt) => room?.tip(to, amt),
+    buy: (slot, item) => room?.buy(slot, item),
+  },
+  onClose: () => {
+    if (isTouch) touch.setVisible(true);
+    else controls.lock();
+  },
+});
+function nearGamePanel() {
+  if (mySeat !== null || myStage !== null) return null;
+  let best = null;
+  let bestD = Infinity;
+  for (const p of GAME_PANELS) {
+    const d = Math.hypot(camera.position.x - p.x, camera.position.z - p.z);
+    if (d <= p.reach && d < bestD) {
+      best = p;
+      bestD = d;
+    }
+  }
+  return best;
+}
+function openGame(id) {
+  if (gameOpen) return;
+  gameOpen = true; // đặt trước khi mở khoá con trỏ để sự kiện unlock không bật menu
+  document.body.classList.add('game-open');
+  if (!gameHost.open(id)) {
+    gameOpen = false;
+    document.body.classList.remove('game-open');
+    return;
+  }
+  keys.clear();
+  if (isTouch) touch.setVisible(false);
+  else controls.unlock();
+}
+function closeGame() {
+  if (!gameOpen) return;
+  gameOpen = false;
+  document.body.classList.remove('game-open');
+  gameHost.close();
+}
+$('game-close').addEventListener('click', closeGame);
+// Ví điểm (tặng điểm, cửa hàng): phím P, hoặc chạm vào số điểm ở góc màn hình
+function openWallet() {
+  if (!room || !myId || isStunned()) return;
+  openGame('wallet');
+}
+$('points').addEventListener('click', openWallet);
+addEventListener('keydown', (e) => {
+  if (gameOpen && e.code === 'Escape') closeGame();
+});
+
 // Phím E / nút trên điện thoại: đứng dậy, dừng hát, hoặc ngồi/hát nếu đang đứng gần chỗ trống
 function interact() {
   if (!room || !myId || isStunned()) return;
@@ -896,6 +1059,11 @@ function interact() {
   }
   if (nearMixer()) {
     openMixer();
+    return;
+  }
+  const gamePanel = nearGamePanel();
+  if (gamePanel) {
+    openGame(gamePanel.id);
     return;
   }
   if (nearestFreeStage() >= 0) {
@@ -924,6 +1092,7 @@ function updateSitPrompt() {
     if (mySeat !== null) text = isTouch ? 'Đứng' : 'Nhấn E để đứng dậy';
     else if (myStage !== null) text = isTouch ? 'Dừng hát' : 'Nhấn E để dừng hát';
     else if (nearMixer()) text = isTouch ? 'Chỉnh âm' : 'Nhấn E để chỉnh âm thanh mic hát';
+    else if (nearGamePanel()) text = isTouch ? 'Chơi game' : `Nhấn E để chơi ${nearGamePanel().title.toLocaleLowerCase('vi')}`;
     else if (nearestFreeStage() >= 0) text = isTouch ? 'Hát' : 'Nhấn E để hát';
     else if (nearestFreeSeat() >= 0) text = isTouch ? 'Ngồi' : 'Nhấn E để ngồi';
   }
@@ -950,6 +1119,7 @@ function startStun(id, duration) {
   if (id === myId) {
     fpHand.cancel();
     selfAvatar.cancelActions(SELF);
+    closeGame(); // bị đánh choáng thì thoát game
   } else {
     avatars.cancelActions(id);
   }
@@ -1065,7 +1235,7 @@ function setActive(active) {
     applyDesired(); // sau thao tác click đầu tiên, trình duyệt cho phép phát có tiếng
   } else {
     document.body.classList.add('show-chat');
-    if (!chatting && !mixerOpen && login.style.display === 'none') menu.style.display = 'flex'; // đang chat thì không hiện menu
+    if (!chatting && !mixerOpen && !gameOpen && login.style.display === 'none') menu.style.display = 'flex'; // đang chat thì không hiện menu
   }
 }
 
@@ -1101,6 +1271,9 @@ addEventListener('keydown', (e) => {
   else if (e.code === 'KeyV' && !e.repeat) toggleView();
   else if (EMOTE_KEYS[e.code] && !e.repeat) doEmote(EMOTE_KEYS[e.code]);
   else if (e.code === 'Enter' && !e.repeat) startChat();
+  else if (e.code === 'KeyP' && !e.repeat) openWallet();
+  else if (e.code === 'KeyY' && singPromptOpen()) answerSing(true);
+  else if (e.code === 'KeyN' && singPromptOpen()) answerSing(false);
   else keys.add(e.code);
 });
 addEventListener('keyup', (e) => {

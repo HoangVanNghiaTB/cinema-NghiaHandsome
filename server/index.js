@@ -5,7 +5,10 @@ import path from 'path';
 import express from 'express';
 import { Server } from 'socket.io';
 import { MIX_PARAMS, MIX_DEFAULTS, cleanMixValue } from '../client/src/audio/mixParams.js';
-import { cleanLook } from '../client/src/scene/looks.js';
+import { cleanLook, limitLook } from '../client/src/scene/looks.js';
+import { SING_COST, SING_PROMPT_MS, TIP_AMOUNTS } from '../client/src/economy.js';
+import { createGames } from './games.js';
+import { createWallet } from './wallet.js';
 
 const PORT = process.env.PORT || 3000;
 const MAX_PLAYERS = 10;
@@ -55,6 +58,28 @@ let mix = { ...MIX_DEFAULTS };
 // Một phòng duy nhất: id socket -> { id, name, color, x, y, z, ry }
 const players = new Map();
 
+// Điểm của rạp (xem server/wallet.js) và mini game treo tường (xem server/games.js)
+const wallet = createWallet(io, players);
+const games = createGames(io, players, wallet);
+
+// Phòng trống quá ngần này thì xoá dữ liệu điểm / phụ kiện / xếp hạng game (tải lại trang một mình thì chưa mất)
+const ROOM_RESET_MS = Number(process.env.ROOM_RESET_MS) || 60000;
+let resetTimer = null;
+
+// Người chơi gửi cho người khác: bỏ khoá tài khoản điểm (cid) và các thứ chỉ server dùng
+const publicPlayer = ({ cid, emoteAt, lastPunchAt, stunnedUntil, immuneUntil, ...pub }) => pub;
+const singTimers = new Map(); // id -> hẹn giờ tự xuống sân khấu nếu không xác nhận trả điểm hát
+
+// Rời sân khấu (xuống, bị đánh văng, hết thời gian xác nhận)
+function leaveStage(p) {
+  clearTimeout(singTimers.get(p.id));
+  singTimers.delete(p.id);
+  if (p.stage === null) return;
+  p.stage = null;
+  p.singPaid = false;
+  io.emit('stage-update', { id: p.id, stage: null });
+}
+
 const cleanName = (v) => String(v ?? '').trim().slice(0, 20) || 'Khách';
 const cleanColor = (v) => (/^#[0-9a-f]{6}$/i.test(v) ? v : '#888888');
 const num = (v) => (Number.isFinite(v) ? v : 0);
@@ -78,6 +103,7 @@ const cleanPosition = (v) => (Number.isFinite(v) && v >= 0 ? v : 0);
 
 io.on('connection', (socket) => {
   let lastChatAt = 0;
+  games.attach(socket);
 
   socket.on('chat', (data = {}) => {
     const p = players.get(socket.id);
@@ -90,22 +116,27 @@ io.on('connection', (socket) => {
 
   socket.on('join', (data = {}) => {
     if (players.has(socket.id)) return;
+    clearTimeout(resetTimer);
     if (players.size >= MAX_PLAYERS) {
       socket.emit('room-full');
       socket.disconnect(true);
       return;
     }
+    // Khoá tài khoản điểm: clientId do trình duyệt tự sinh (tải lại trang vẫn giữ điểm, không được phát lại 500)
+    const cid = /^[\w-]{8,64}$/.test(data.clientId) ? data.clientId : socket.id;
     const player = {
       id: socket.id,
+      cid,
       name: cleanName(data.name),
       color: cleanColor(data.color),
-      look: cleanLook(data.look), // phụ kiện + màu áo (xem client/src/scene/looks.js)
+      look: limitLook(cleanLook(data.look), wallet.ownedSet(cid)), // phụ kiện chưa mua bị bỏ (xem client/src/scene/looks.js)
       x: 0,
       y: 0,
       z: -4,
       ry: 0,
       seat: null, // chỉ số ghế đang ngồi, hoặc null
-      stage: null, // chỉ số sân khấu đang hát, hoặc null
+      stage: null, // chỉ số sân khấu đang đứng, hoặc null
+      singPaid: false, // đã trả điểm để hát chưa (đứng trên sân khấu mà chưa trả thì chưa phát tiếng hát)
       holding: null, // vật đang cầm ('lightstick' | 'eat'), hoặc null
       emoteAt: {}, // loại hành động -> lần cuối làm (để tính thời gian chờ)
       lastPunchAt: 0,
@@ -115,12 +146,14 @@ io.on('connection', (socket) => {
     players.set(socket.id, player);
     socket.emit('init', {
       id: socket.id,
-      players: [...players.values()].filter((p) => p.id !== socket.id),
+      players: [...players.values()].filter((p) => p.id !== socket.id).map(publicPlayer),
       video: videoSnapshot(),
       mix,
+      games: games.briefs(),
+      self: { look: player.look, wallet: wallet.snapshot(cid) },
       iceServers,
     });
-    socket.broadcast.emit('player-joined', player);
+    socket.broadcast.emit('player-joined', publicPlayer(player));
   });
 
   socket.on('move', (data = {}) => {
@@ -177,15 +210,37 @@ io.on('connection', (socket) => {
       socket.emit('stage-denied');
       return;
     }
+    // Lên sân khấu (đèn sáng) trước, chưa trả điểm thì chưa phát tiếng hát; client hỏi "dùng 50 điểm để vào hát?"
     p.stage = stage;
-    io.emit('stage-update', { id: p.id, stage });
+    p.singPaid = false;
+    clearTimeout(singTimers.get(p.id));
+    singTimers.set(p.id, setTimeout(() => {
+      if (p.stage === stage && !p.singPaid) {
+        leaveStage(p);
+        io.to(p.id).emit('notice', { text: 'Hết thời gian xác nhận, bạn đã xuống sân khấu.' });
+      }
+    }, SING_PROMPT_MS + 1500));
+    io.emit('stage-update', { id: p.id, stage, paid: false });
+  });
+
+  // Đồng ý dùng điểm để hát: trừ điểm rồi mới cho phát tiếng hát
+  socket.on('sing-pay', () => {
+    const p = players.get(socket.id);
+    if (!p || p.stage === null || p.singPaid) return;
+    if (!wallet.pay(p.cid, SING_COST, 'Vào hát karaoke')) {
+      socket.emit('notice', { text: `Không đủ ${SING_COST} điểm để vào hát.` });
+      leaveStage(p);
+      return;
+    }
+    p.singPaid = true;
+    clearTimeout(singTimers.get(p.id));
+    singTimers.delete(p.id);
+    io.emit('stage-update', { id: p.id, stage: p.stage, paid: true });
   });
 
   socket.on('stop-sing', () => {
     const p = players.get(socket.id);
-    if (!p || p.stage === null) return;
-    p.stage = null;
-    io.emit('stage-update', { id: p.id, stage: null });
+    if (p) leaveStage(p);
   });
 
   socket.on('stand', () => {
@@ -225,10 +280,7 @@ io.on('connection', (socket) => {
       target.seat = null;
       io.emit('seat-update', { id: target.id, seat: null });
     }
-    if (target.stage !== null) {
-      target.stage = null; // đang hát mà bị đánh thì bị đẩy khỏi sân khấu
-      io.emit('stage-update', { id: target.id, stage: null });
-    }
+    leaveStage(target); // đang hát mà bị đánh thì bị đẩy khỏi sân khấu (không hoàn điểm)
     io.emit('stun', { id: target.id, by: p.id, duration: STUN_MS });
   });
 
@@ -242,8 +294,29 @@ io.on('connection', (socket) => {
   socket.on('look', (data = {}) => {
     const p = players.get(socket.id);
     if (!p) return;
-    p.look = cleanLook(data.look);
+    p.look = limitLook(cleanLook(data.look), wallet.ownedSet(p.cid)); // chỉ đeo được phụ kiện đã mua
     socket.broadcast.emit('look-update', { id: p.id, look: p.look });
+  });
+
+  // Tặng điểm cho người khác (mức trong TIP_AMOUNTS), ví dụ để khen người hát
+  socket.on('tip', (data = {}) => {
+    const p = players.get(socket.id);
+    const to = players.get(data.to);
+    if (!p || !to || to.id === p.id || to.cid === p.cid || !TIP_AMOUNTS.includes(data.amt)) return;
+    if (!wallet.pay(p.cid, data.amt, `Tặng ${to.name}`)) {
+      socket.emit('notice', { text: 'Không đủ điểm để tặng.' });
+      return;
+    }
+    wallet.add(to.cid, data.amt, `${p.name} tặng bạn`);
+    io.emit('notice', { text: `${p.name} tặng ${to.name} ${data.amt} điểm 💝` });
+  });
+
+  // Mua phụ kiện bằng điểm (xem ITEM_PRICES ở client/src/scene/looks.js)
+  socket.on('shop-buy', (data = {}) => {
+    const p = players.get(socket.id);
+    if (!p) return;
+    const error = wallet.buy(p.cid, String(data.slot), String(data.item));
+    if (error) socket.emit('notice', { text: error });
   });
 
   // Bảng chỉnh âm: ai trong phòng cũng chỉnh được; server kiểm tra giá trị rồi chuyển cho những người còn lại
@@ -277,12 +350,21 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
+    const leaving = players.get(socket.id);
+    if (leaving) leaveStage(leaving);
     if (!players.delete(socket.id)) return;
     io.emit('player-left', socket.id);
-    // Phòng trống thì xoá video cũ và trả bảng chỉnh âm về mặc định
+    // Phòng trống thì xoá video cũ, trả bảng chỉnh âm về mặc định; điểm, phụ kiện và dữ liệu mini game xoá sau ROOM_RESET_MS
     if (players.size === 0) {
       video = { videoId: null, playing: false, position: 0, updatedAt: Date.now() };
       mix = { ...MIX_DEFAULTS };
+      clearTimeout(resetTimer);
+      resetTimer = setTimeout(() => {
+        if (players.size === 0) {
+          games.reset();
+          wallet.reset();
+        }
+      }, ROOM_RESET_MS);
     }
   });
 });

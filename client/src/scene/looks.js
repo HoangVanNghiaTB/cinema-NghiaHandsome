@@ -54,7 +54,26 @@ export const LOOK_LABELS = { kind: 'Kiểu', fruit: 'Trái cây', hat: 'Mũ', gl
 // Màu thân chọn tay (đè lên màu trái cây); 'same' = màu trái cây (hoặc màu chọn lúc đăng nhập nếu không chọn trái)
 export const SHIRT_COLORS = ['same', '#e74c3c', '#f39c12', '#f1c40f', '#2ecc71', '#1abc9c', '#3498db', '#9b59b6', '#ff7eb6', '#ecf0f1', '#2c3e50'];
 
-export const DEFAULT_LOOK = { kind: 'chubby_m', fruit: 'orange', hat: 'none', glasses: 'none', ears: 'none', back: 'none', shirt: 'same' };
+// Phụ kiện phải mua bằng điểm (xem economy.js); kiểu nhân vật, trái cây và màu thân thì miễn phí.
+// Mặc định mọi người vào chỉ có nhân vật trơn, không phụ kiện.
+export const ITEM_PRICES = {
+  hat: { cap: 80, party: 60, crown: 200, tophat: 120 },
+  glasses: { round: 60, sun: 80 },
+  ears: { phones: 100, cat: 120 },
+  back: { backpack: 100, wings: 250, tail: 90 },
+};
+export const itemKey = (slot, id) => `${slot}:${id}`;
+
+// Bỏ các phụ kiện chưa mua (owned: Set các itemKey)
+export function limitLook(look, owned) {
+  const out = { ...look };
+  for (const slot of Object.keys(ITEM_PRICES)) {
+    if (out[slot] !== 'none' && !owned.has(itemKey(slot, out[slot]))) out[slot] = 'none';
+  }
+  return out;
+}
+
+export const DEFAULT_LOOK ={ kind: 'chubby_m', fruit: 'orange', hat: 'none', glasses: 'none', ears: 'none', back: 'none', shirt: 'same' };
 
 // Giá trị hợp lệ (thứ gì sai thì về mặc định) để không ai gửi chuỗi lạ cho người khác
 export function cleanLook(v) {

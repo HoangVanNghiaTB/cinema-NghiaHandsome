@@ -63,6 +63,83 @@
       #mixer-groups.plain .mix-row { opacity: 0.4; } /* đang giống mic thường: các thanh không có tác dụng */
       #mixer .actions { display: flex; gap: 8px; justify-content: flex-end; }
       #mixer button { font-size: 14px; padding: 8px 14px; cursor: pointer; }
+      /* Mini game treo tường (mở bằng phím E trước tranh game). Cỡ tính bằng % và JS, không dùng vh/vw vì trang có thể bị xoay ngang bằng CSS */
+      #game {
+        display: none; position: fixed; inset: 0; z-index: 12; align-items: center; justify-content: center;
+        background: rgba(0, 0, 0, 0.7); color: #fff;
+      }
+      #game .box {
+        background: #14161c; border: 1px solid #3a4050; border-radius: 10px; padding: 8px 12px;
+        width: 96%; height: 94%; max-width: 980px; box-sizing: border-box; display: flex; flex-direction: column;
+      }
+      #game .head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+      #game h2 { margin: 0; font-size: 18px; color: #ffd36b; }
+      #game h4 { margin: 8px 0 3px; font-size: 13px; color: #6bd1ff; }
+      #game button { font-size: 14px; padding: 7px 12px; cursor: pointer; }
+      #game-body { flex: 1; min-height: 0; position: relative; }
+      #game .g-split { display: flex; gap: 12px; height: 100%; align-items: flex-start; justify-content: center; }
+      #game .g-canvas { touch-action: none; border-radius: 6px; flex: none; }
+      #game .g-side { width: 158px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; overflow: auto; max-height: 100%; }
+      #game .g-status { color: #ffd36b; font-weight: bold; min-height: 2.4em; }
+      #game .g-dim { opacity: 0.6; font-size: 12px; }
+      #game .g-timer { font-size: 30px; font-weight: bold; color: #6bff9d; }
+      #game .g-seat { display: flex; align-items: center; gap: 6px; }
+      #game .g-seat-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      #game .g-seat button { padding: 4px 8px; font-size: 12px; }
+      #game .g-top { display: flex; justify-content: space-between; gap: 6px; }
+      #game .g-top.me { color: #6bff9d; }
+      #game .g-whack { display: grid; grid-template: repeat(3, 1fr) / repeat(3, 1fr); gap: 6px; flex: none; }
+      #game .g-hole { background: #4a3520; border: 3px solid #2a1c0e; border-radius: 50%; font-size: inherit; padding: 0; cursor: pointer; touch-action: none; line-height: 1; }
+      #game .g-hole.gold { background: #6b5a1a; border-color: #ffd36b; }
+      #game .g-2048 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 6px; background: #1d212a; border-radius: 8px; flex: none; box-sizing: border-box; touch-action: none; }
+      #game .g-tile { border-radius: 6px; display: flex; align-items: center; justify-content: center; font-weight: bold; }
+      #game .g-btn.on { background: #0a8a4a; color: #fff; border-color: #0a8a4a; }
+      #game .g-dice { align-items: stretch; }
+      #game .g-dice-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+      #game .g-tabs { display: flex; gap: 6px; }
+      #game .g-dice-row { display: flex; align-items: center; gap: 8px; }
+      #game .g-die { width: 62px; height: 62px; border-radius: 12px; background: linear-gradient(145deg, #ffffff, #d9d9d9); color: #222; font-size: 32px; font-weight: bold; display: flex; flex-direction: column; align-items: center; justify-content: center; flex: none; box-shadow: 0 3px 0 #9a9a9a, 0 6px 10px rgba(0,0,0,0.45); box-sizing: border-box; }
+      #game .g-die.pips { display: grid; grid-template: repeat(3, 1fr) / repeat(3, 1fr); padding: 8px; }
+      #game .g-die.pips i { display: flex; align-items: center; justify-content: center; }
+      #game .g-die .pip { width: 11px; height: 11px; border-radius: 50%; background: #1b1b1b; box-shadow: inset 0 1px 2px rgba(255,255,255,0.35); }
+      #game .g-die .pip.red { background: #d11f2a; }
+      #game .g-die.bc { background: linear-gradient(145deg, #fff8e1, #f1dfa8); box-shadow: 0 3px 0 #b39a4b, 0 6px 10px rgba(0,0,0,0.45); }
+      #game .g-die-icon { font-size: 30px; line-height: 1.05; }
+      #game .g-die-name { font-size: 11px; font-weight: bold; color: #7a5a14; }
+      #game .g-dice-row.rolling .g-die { animation: die-roll 0.28s linear infinite; }
+      #game .g-dice-row.rolling .g-die:nth-child(2) { animation-delay: -0.1s; }
+      #game .g-dice-row.rolling .g-die:nth-child(3) { animation-delay: -0.2s; }
+      @keyframes die-roll { 0% { transform: translateY(0) rotate(0); } 25% { transform: translateY(-10px) rotate(14deg); } 50% { transform: translateY(0) rotate(-10deg); } 75% { transform: translateY(-6px) rotate(8deg); } 100% { transform: translateY(0) rotate(0); } }
+      #game .g-dice-verdict { font-size: 17px; font-weight: bold; color: #ffd36b; margin-left: 6px; }
+      #game .g-spots { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+      #game .g-spots.six { grid-template-columns: repeat(3, 1fr); grid-template-rows: 1fr 1fr; }
+      #game .g-spot { color: #fff; border: 2px solid rgba(255,255,255,0.25); border-radius: 10px; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 4px; font-size: 13px; }
+      #game .g-spot:disabled { opacity: 0.55; cursor: default; }
+      #game .g-spot-label { font-size: 24px; font-weight: bold; }
+      #game .g-spot-sub { opacity: 0.85; font-size: 12px; }
+      #game .g-spot-mine { color: #ffe14d; font-weight: bold; font-size: 13px; }
+      #game .g-chips { display: flex; gap: 4px; }
+      #game .g-chips button { flex: 1; padding: 6px 0; }
+      #game .g-vote { display: flex; flex-direction: column; gap: 6px; height: 100%; }
+      #game .g-vote-bar { display: flex; gap: 6px; }
+      #game .g-vote-bar input { flex: 1; min-width: 0; font-size: 16px; padding: 6px 8px; }
+      #game .g-vote-list { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 6px; }
+      #game .g-vote-row { display: flex; align-items: center; gap: 8px; background: #1d212a; border-radius: 8px; padding: 5px 8px; }
+      #game .g-vote-row.lead { outline: 2px solid #c58bff; }
+      #game .g-vote-row img { width: 80px; height: 45px; object-fit: cover; border-radius: 4px; flex: none; background: #000; }
+      #game .g-vote-info { flex: 1; min-width: 0; }
+      #game .g-vote-title { font-size: 13px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+      #game .g-vote-count { min-width: 44px; text-align: right; }
+      #game .g-wallet { display: flex; flex-direction: column; height: 100%; gap: 6px; }
+      #game .g-wallet-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+      #game .g-wallet-pts { font-size: 20px; color: #ffd36b; }
+      #game .g-wallet-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 5px; padding-right: 4px; }
+      #game .g-wallet-row { display: flex; align-items: center; gap: 6px; background: #1d212a; border-radius: 8px; padding: 4px 8px; }
+      #game .g-wallet-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+      #game .g-wallet-row .g-btn { padding: 5px 10px; font-size: 13px; }
+      #game .g-wallet-row .g-btn:disabled { opacity: 0.4; cursor: default; }
+      #game .g-earn-row { display: flex; flex-direction: column; background: #1d212a; border-radius: 8px; padding: 5px 8px; font-size: 13px; }
+      #game .g-earn-row b { color: #6bd1ff; }
       #login { z-index: 20; background: #000; }
       #menu button, #login button { font-size: 16px; padding: 10px 20px; cursor: pointer; }
       #menu #look-menu { display: flex; flex-direction: column; align-items: center; gap: 6px; max-width: 92vw; }
@@ -118,6 +195,20 @@
       input { user-select: text; -webkit-user-select: text; }
       body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 
+      /* Điểm của rạp: số điểm ở góc (chạm để mở ví), thông báo cộng/trừ điểm, và hỏi trả điểm để hát. Đều nhỏ, ở mép màn hình, không che cảnh */
+      #points { pointer-events: auto; cursor: pointer; margin-top: 3px; }
+      #toasts { position: fixed; top: 74px; left: 12px; z-index: 14; pointer-events: none; display: flex; flex-direction: column; gap: 4px; }
+      #toasts .toast { background: rgba(0, 0, 0, 0.7); color: #fff; padding: 3px 9px; border-radius: 6px; font-size: 13px; max-width: 70vw; }
+      body.game-open #toasts { top: auto; bottom: 10px; left: 50%; transform: translateX(-50%); align-items: center; } /* đang mở game / ví thì xuống dưới, khỏi đè tiêu đề */
+      #toasts .toast.plus { color: #7dff9a; }
+      #toasts .toast.minus { color: #ffb38a; }
+      #sing-prompt {
+        display: none; position: fixed; top: 6px; left: 50%; transform: translateX(-50%); z-index: 14; align-items: center; gap: 8px;
+        background: rgba(0, 0, 0, 0.72); color: #fff; padding: 4px 6px 4px 12px; border-radius: 18px; font-size: 13px; white-space: nowrap;
+      }
+      #sing-prompt button { font-size: 13px; padding: 4px 10px; border-radius: 12px; border: 0; cursor: pointer; }
+      #sing-yes { background: #0a8a4a; color: #fff; }
+      body.touch #sing-prompt button { padding: 7px 12px; }
       #sit-prompt {
         display: none; position: fixed; left: 50%; bottom: 18%; transform: translateX(-50%); z-index: 6;
         pointer-events: none; color: #fff; background: rgba(0, 0, 0, 0.6); padding: 8px 16px; border-radius: 6px; font-size: 16px;
@@ -259,6 +350,7 @@
     <div id="hud">
       <div id="net">○ Chưa vào phòng</div>
       <div id="voice-status">Voice: chưa bật</div>
+      <div id="points" title="Ví điểm: tặng điểm, mua phụ kiện (phím P)">💰 <b id="points-n">500</b> điểm</div>
       <div id="fps"></div>
     </div>
 
@@ -268,6 +360,12 @@
     </div>
 
     <div id="sit-prompt"></div>
+    <div id="toasts"></div>
+    <div id="sing-prompt">
+      <span>🎤 Dùng <b id="sing-cost">50</b> điểm để vào hát?</span>
+      <button id="sing-yes">Y · Có</button>
+      <button id="sing-no">N · Không</button>
+    </div>
 
     <div id="touch-ui">
       <div id="look-zone"></div>
@@ -301,6 +399,16 @@
           <button id="mixer-reset">Về mặc định</button>
           <button id="mixer-close">Đóng</button>
         </div>
+      </div>
+    </div>
+
+    <div id="game">
+      <div class="box">
+        <div class="head">
+          <h2 id="game-title"></h2>
+          <button id="game-close">Đóng (Esc)</button>
+        </div>
+        <div id="game-body"></div>
       </div>
     </div>
 
@@ -356,7 +464,7 @@
         <label><input type="checkbox" id="show-fps" /> Hiện FPS</label>
       </div>
       <div id="msg"></div>
-      <small id="hint">WASD để đi, chuột để nhìn, M để bật/tắt mic, E để ngồi/đứng/hát (gần ghế hoặc sân khấu), chuột trái hoặc F để đánh, phím 1 vỗ tay · 2 pháo giấy · 3 lightstick · 4 trái tim · 5 ăn cơm (bấm lại để thôi), V đổi góc nhìn 1/3 (góc 3: bấm Alt để xoay mắt nhìn quanh nhân vật, bấm Alt lần nữa để về sau lưng), Enter để chat, Esc để mở menu này</small>
+      <small id="hint">WASD để đi, chuột để nhìn, M để bật/tắt mic, E để ngồi/đứng/hát (gần ghế hoặc sân khấu; hát tốn 50 điểm), P mở ví điểm (tặng điểm, mua phụ kiện), chuột trái hoặc F để đánh, phím 1 vỗ tay · 2 pháo giấy · 3 lightstick · 4 trái tim · 5 ăn cơm (bấm lại để thôi), V đổi góc nhìn 1/3 (góc 3: bấm Alt để xoay mắt nhìn quanh nhân vật, bấm Alt lần nữa để về sau lưng), Enter để chat, Esc để mở menu này</small>
     </div>
     <script type="module" src="/src/main.js"></script>
   </body>

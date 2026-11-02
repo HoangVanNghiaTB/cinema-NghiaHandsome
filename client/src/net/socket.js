@@ -7,16 +7,38 @@ const SERVER_URL = import.meta.env.DEV ? `http://${location.hostname}:3000` : un
 //             onStatus(connected), onVideo({ videoId, playing, position }), onSignal(from, data),
 //             onChat({ id, name, text }), onSeat({ id, seat }), onSeatDenied(),
 //             onStun({ id, by, duration }), onStage({ id, stage }), onStageDenied(),
-//             onEmote({ id, type, on? }), onSwing({ id }), onMix(params), onLook({ id, look }) }
+//             onEmote({ id, type, on? }), onSwing({ id }), onMix(params), onLook({ id, look }),
+//             onGameState({ game, state }), onGameBrief({ game, text }), onWallet({ pts, owned, delta, reason }), onNotice({ text }) };
+//             onInit còn nhận thêm briefs của các game và self = { look, wallet } (nhân vật đã lọc phụ kiện chưa mua, điểm hiện có)
+// Mã nhận dạng trình duyệt này (để tải lại trang vẫn giữ điểm và phụ kiện đã mua trong phòng)
+const CLIENT_ID_KEY = 'cinema-client-id';
+function getClientId() {
+  try {
+    let id = localStorage.getItem(CLIENT_ID_KEY);
+    if (!/^[\w-]{8,64}$/.test(id ?? '')) {
+      id = (crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`).replace(/[^\w-]/g, '');
+      localStorage.setItem(CLIENT_ID_KEY, id);
+    }
+    return id;
+  } catch {
+    return null; // không lưu được thì server dùng id kết nối (mỗi lần vào là một tài khoản mới)
+  }
+}
+
 export function connectToRoom({ name, color, look }, handlers) {
+  const clientId = getClientId();
   const socket = io(SERVER_URL);
 
   socket.on('connect', () => {
     handlers.onStatus?.(true);
-    socket.emit('join', { name, color, look });
+    socket.emit('join', { name, color, look, clientId });
   });
   socket.on('disconnect', () => handlers.onStatus?.(false));
-  socket.on('init', ({ id, players, video, iceServers, mix }) => handlers.onInit?.(id, players, video, iceServers, mix));
+  socket.on('init', ({ id, players, video, iceServers, mix, games, self }) => handlers.onInit?.(id, players, video, iceServers, mix, games, self));
+  socket.on('wallet', (w) => handlers.onWallet?.(w));
+  socket.on('notice', (n) => handlers.onNotice?.(n));
+  socket.on('game-state', (d) => handlers.onGameState?.(d));
+  socket.on('game-brief', (d) => handlers.onGameBrief?.(d));
   socket.on('mix-state', (m) => handlers.onMix?.(m));
   socket.on('look-update', (d) => handlers.onLook?.(d));
   socket.on('video-state', (v) => handlers.onVideo?.(v));
@@ -40,12 +62,18 @@ export function connectToRoom({ name, color, look }, handlers) {
     emote: (type) => socket.emit('emote', { type }),
     sing: (stage) => socket.emit('sing', { stage }),
     stopSing: () => socket.emit('stop-sing'),
+    singPay: () => socket.emit('sing-pay'),
+    tip: (to, amt) => socket.emit('tip', { to, amt }),
+    buy: (slot, item) => socket.emit('shop-buy', { slot, item }),
     sit: (seat) => socket.emit('sit', { seat }),
     stand: () => socket.emit('stand'),
     sendChat: (text) => socket.emit('chat', { text }),
     setLook: (look) => socket.emit('look', { look }),
     setMix: (key, value) => socket.emit('mix-set', { key, value }),
     resetMix: () => socket.emit('mix-reset'),
+    gameOpen: (game) => socket.emit('game-open', { game }),
+    gameClose: (game) => socket.emit('game-close', { game }),
+    gameAct: (game, data) => socket.emit('game-act', { ...data, game }),
     close: () => socket.close(),
     sendSignal: (to, data) => socket.emit('signal', { to, data }),
     loadVideo: (videoId) => socket.emit('video-load', { videoId }),

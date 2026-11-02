@@ -155,6 +155,10 @@ function createRoom(nsp, cfg) {
       const p = players.get(socket.id);
       const text = String(data.text ?? '').trim().slice(0, 200);
       const now = Date.now();
+      if (p && games.chatBlocked(p.id)) {
+        socket.emit('notice', { text: 'Đang trong ván Ma Sói, chỉ nhắn được trong khung chat của ván.' });
+        return;
+      }
       if (!p || p.muted || !text || now - lastChatAt < 300) return; // chống spam; người bị admin khoá chat thì không gửi được
       lastChatAt = now;
       nsp.emit('chat', { id: p.id, name: p.name, text });

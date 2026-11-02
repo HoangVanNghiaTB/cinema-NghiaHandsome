@@ -344,8 +344,10 @@ const voice = createVoice({
   shouldKeep: (id) => distanceTo(id) < VOICE_UNLINK_DIST,
   forceLink: (id) => myStagePaid || isSinger(id),
 });
+let micLocked = false; // game (Ma Sói) đang khoá mic: ban đêm và người chết không bật được
+let micBeforeLock = false;
 function toggleMic() {
-  if (voiceMode !== 'mic') return;
+  if (voiceMode !== 'mic' || micLocked) return;
   micOn = voice.toggleMic();
   updateHud();
 }
@@ -619,6 +621,8 @@ function joinRoom(profile) {
     onVideo: setDesired,
     onMix: setMix,
     onGameState: (d) => gameHost.onState(d),
+    onGameCue: (d) => gameHost.onCue(d),
+    onGameDenied: () => closeGame(), // server không cho vào (ví dụ Ma Sói khi dưới 100 điểm); lý do hiện bằng thông báo nhỏ
     onGameBrief: ({ game, text }) => gamePanels.setBrief(game, text),
     onWallet: setWallet,
     onNotice: ({ text }) => showToast(text),
@@ -1017,8 +1021,25 @@ function listenVoiceVolume(id, senderMode) {
 
 // Bật/tắt mic theo ý muốn (không đảo ngược)
 function setMic(on) {
-  if (voiceMode === 'mic' && micOn !== on) toggleMic();
+  if (voiceMode === 'mic' && micOn !== on) {
+    micOn = voice.toggleMic();
+    updateHud();
+  }
 }
+// Cho game tắt / bật mic của người chơi (xem games/werewolf.js): lock(true) tắt mic và khoá nút; lock(false) mở khoá, trả mic như trước
+const micControl = {
+  lock(on) {
+    if (on) {
+      if (!micLocked) micBeforeLock = micOn;
+      micLocked = true;
+      setMic(false);
+    } else if (micLocked) {
+      micLocked = false;
+      setMic(micBeforeLock);
+    }
+  },
+  set: (on) => !micLocked && setMic(on),
+};
 
 // Bảng chỉnh âm mic hát (treo dưới bức ảnh tường sau). Thông số dùng chung cả phòng qua server: ai chỉnh thì người đang hát
 // và khán giả nghe đổi theo ngay. Chỉ người hát dựng chuỗi hiệu ứng, nhưng máy nào cũng nhận bộ thông số để dùng khi tới lượt.
@@ -1142,6 +1163,7 @@ const gameHost = createGameHost({
     players: () => [...names].filter(([id]) => id !== myId).map(([id, name]) => ({ id, name, singing: paidSingers.has(id) })),
     tip: (to, amt) => room?.tip(to, amt),
     buy: (slot, item) => room?.buy(slot, item),
+    mic: micControl,
   },
   onClose: () => {
     if (isTouch) touch.setVisible(true);

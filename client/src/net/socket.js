@@ -48,6 +48,8 @@ export function connectToRoom({ name, color, look, room, password }, handlers) {
   socket.on('wallet', (w) => handlers.onWallet?.(w));
   socket.on('notice', (n) => handlers.onNotice?.(n));
   socket.on('game-state', (d) => handlers.onGameState?.(d));
+  socket.on('game-denied', () => handlers.onGameDenied?.());
+  socket.on('game-cue', (d) => handlers.onGameCue?.(d));
   socket.on('game-brief', (d) => handlers.onGameBrief?.(d));
   socket.on('mix-state', (m) => handlers.onMix?.(m));
   socket.on('look-update', (d) => handlers.onLook?.(d));

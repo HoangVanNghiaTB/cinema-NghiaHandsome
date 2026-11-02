@@ -12,6 +12,7 @@ export const GAME_PANELS = [
   { id: 'g2048', title: '2048', icon: '🔢', color: '#6bd1ff', x: WALL_X, y: 1.5, z: 0, ry: -Math.PI / 2 },
   { id: 'dice', title: 'BẦU CUA · TÀI XỈU', icon: '🎲🦀', color: '#ff5d7a', x: -WALL_X, y: 1.9, z: 2, ry: Math.PI / 2 },
   { id: 'connect4', title: 'NỐI 4', icon: '🔴🟡', color: '#ffe14d', x: WALL_X, y: 1.9, z: 2, ry: -Math.PI / 2 },
+  { id: 'werewolf', title: 'MA SÓI', icon: '🐺🌙', color: '#ff5d5d', x: -4.5, y: 2.3, z: ROOM.maxZ - 0.06, ry: Math.PI }, // tường sau, bên kia bảng mic
   { id: 'vote', title: 'BÌNH CHỌN PHIM', icon: '🗳️🎬', color: '#c58bff', x: 4.5, y: 2.3, z: ROOM.maxZ - 0.06, ry: Math.PI }, // tường sau, cạnh bảng mic
 ].map((p) => ({ ...p, width: 1.7, height: 1.0, reach: 2.2 }));
 

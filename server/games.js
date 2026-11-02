@@ -6,6 +6,7 @@
 // createGames(io, players).attach(socket) gắn các sự kiện 'game-open' / 'game-close' / 'game-act' cho từng socket.
 
 import { DUEL_STAKES, DUEL_STAKE_DEFAULT } from '../client/src/economy.js';
+import { makeWerewolf } from './werewolf.js';
 
 const LEADERBOARD_SIZE = 5;
 
@@ -663,7 +664,12 @@ export function createGames(io, players, wallet) {
   // Đẩy trạng thái cho người đang mở game, và dòng tóm tắt cho cả phòng nếu có đổi
   function push(id) {
     const g = games[id];
-    io.to(roomOf(id)).emit('game-state', { game: id, state: g.state() });
+    if (g.stateFor) {
+      // game có thông tin riêng từng người (Ma Sói): mỗi người nhận trạng thái của riêng mình
+      for (const sid of io.adapter.rooms.get(roomOf(id)) ?? []) io.to(sid).emit('game-state', { game: id, state: g.stateFor(sid) });
+    } else {
+      io.to(roomOf(id)).emit('game-state', { game: id, state: g.state() });
+    }
     const text = g.brief();
     if (text !== briefs[id]) {
       briefs[id] = text;
@@ -682,6 +688,11 @@ export function createGames(io, players, wallet) {
     games.connect4 = makeConnect4({ players, wallet, notify, onChange: () => push('connect4') });
     games.vote = makeVote(players, { reward });
     games.dice = makeDice({ onChange: () => push('dice'), players, wallet });
+    games.werewolf = makeWerewolf({
+      players, wallet, notify,
+      onChange: () => push('werewolf'),
+      emit: (data) => io.to(roomOf('werewolf')).emit('game-cue', { game: 'werewolf', ...data }), // giọng quản trò
+    });
     for (const id of Object.keys(games)) briefs[id] = games[id].brief();
   }
   init();
@@ -690,6 +701,8 @@ export function createGames(io, players, wallet) {
     // Phòng trống hẳn thì xoá hết dữ liệu game (không lưu xếp hạng giữa các lần mở phòng)
     reset: init,
     briefs: () => ({ ...briefs }),
+    // Người đang trong ván Ma Sói không nhắn chat chung của phòng (chat riêng trong ván)
+    chatBlocked: (id) => Object.values(games).some((g) => g.chatBlocked?.(id)),
     attach(socket) {
       const leaveAll = () => {
         for (const id of Object.keys(games)) {
@@ -700,10 +713,16 @@ export function createGames(io, players, wallet) {
       };
       socket.on('game-open', (data = {}) => {
         const g = games[data.game];
-        if (!g || !players.has(socket.id)) return;
+        const p = players.get(socket.id);
+        if (!g || !p) return;
+        if (g.canOpen && !g.canOpen(p)) {
+          notify(socket.id, 'Cần ít nhất 100 điểm để chơi Ma Sói.');
+          socket.emit('game-denied', { game: data.game });
+          return;
+        }
         socket.join(roomOf(data.game));
         if (g.back?.(socket.id)) push(data.game); // quay lại bàn cược giữa ván: huỷ hẹn xử thua
-        socket.emit('game-state', { game: data.game, state: g.state() });
+        socket.emit('game-state', { game: data.game, state: g.stateFor ? g.stateFor(socket.id) : g.state() });
       });
       socket.on('game-close', (data = {}) => {
         const g = games[data.game];

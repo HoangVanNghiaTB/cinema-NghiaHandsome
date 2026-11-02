@@ -158,6 +158,40 @@ function renderServer() {
   );
 }
 
+const getPath = (o, path) => path.split('.').reduce((a, k) => a?.[k], o);
+const setPath = (o, path, v) => {
+  const parts = path.split('.');
+  const last = parts.pop();
+  parts.reduce((a, k) => (a[k] ??= {}), o)[last] = v;
+};
+
+// Thông số game Ma Sói. Chỉ gồm những thứ chỉnh được an toàn (danh sách và giới hạn do server gửi, xem WW_FIELDS)
+function renderWerewolf() {
+  const cfg = state.settings.werewolf;
+  const inputs = new Map();
+  const groups = new Map();
+  for (const f of state.wwFields) {
+    const input = h('input', { type: 'number', min: f.min, max: f.max, value: getPath(cfg, f.path), title: `${f.min} đến ${f.max} ${f.unit}` });
+    inputs.set(f.path, input);
+    if (!groups.has(f.group)) groups.set(f.group, []);
+    groups.get(f.group).push(h('div', { class: 'row', style: 'margin:3px 0' }, h('span', { style: 'min-width:260px' }, f.label), input, h('span', { class: 'dim' }, f.unit)));
+  }
+  const save = () => {
+    const out = {};
+    for (const [path, input] of inputs) setPath(out, path, Number(input.value));
+    run('settings', { werewolf: out });
+  };
+  return h('div', { class: 'card' },
+    h('h2', {}, 'Game Ma Sói'),
+    h('div', { class: 'dim' }, 'Phí và lãi áp dụng từ ván sau (ván đang chơi giữ nguyên). Số ghế áp dụng khi bàn chờ trống. Danh sách vai, điểm từng vai, luật vai, điều kiện thắng và khoảng cân bằng đội hình không chỉnh ở đây.'),
+    [...groups].map(([name, rows]) => h('div', { style: 'margin-top:10px' }, h('b', {}, name), rows)),
+    h('div', { class: 'row', style: 'margin-top:10px' },
+      h('button', { onclick: save }, 'Lưu thông số Ma Sói'),
+      h('button', { class: 'danger', onclick: () => confirm('Đưa mọi thông số Ma Sói về mặc định?') && run('settings', { werewolfReset: true }) }, 'Về mặc định')),
+    h('div', { class: 'dim' }, 'Giá trị ngoài giới hạn sẽ được tự kéo về mức gần nhất. Cài đặt về mặc định khi server khởi động lại.'),
+  );
+}
+
 function renderNotice() {
   const text = h('input', { placeholder: 'Nội dung thông báo...', style: 'flex:1;min-width:180px', maxLength: 200 });
   const sel = h('select', { style: 'background:#0e1016;color:inherit;border:1px solid var(--line);border-radius:6px;padding:5px' },
@@ -223,7 +257,7 @@ function render() {
   // Đang gõ vào ô nào thì không vẽ lại, tránh mất chữ đang nhập
   if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
   $('updated').textContent = 'cập nhật ' + fmtTime(state.now);
-  $('content').replaceChildren(renderServer(), renderNotice(), state.rooms.map(renderRoom), renderBans(), renderLog());
+  $('content').replaceChildren(renderServer(), renderWerewolf(), renderNotice(), state.rooms.map(renderRoom), renderBans(), renderLog());
 }
 
 async function refresh() {

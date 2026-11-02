@@ -650,7 +650,8 @@ function makeDice({ onChange, players, wallet }) {
   };
 }
 
-export function createGames(io, players, wallet) {
+// opts.werewolf: thông số Ma Sói chỉnh được ở trang admin (xem wwDefaults ở client/src/games/werewolf/roles.js)
+export function createGames(io, players, wallet, opts = {}) {
   // Thưởng điểm rạp cho người chơi có id socket này (đã rời phòng thì thôi)
   const reward = (id, amt, reason) => {
     const p = players.get(id);
@@ -689,7 +690,7 @@ export function createGames(io, players, wallet) {
     games.vote = makeVote(players, { reward });
     games.dice = makeDice({ onChange: () => push('dice'), players, wallet });
     games.werewolf = makeWerewolf({
-      players, wallet, notify,
+      players, wallet, notify, cfg: opts.werewolf,
       onChange: () => push('werewolf'),
       emit: (data) => io.to(roomOf('werewolf')).emit('game-cue', { game: 'werewolf', ...data }), // giọng quản trò
     });

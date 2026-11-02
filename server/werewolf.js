@@ -4,8 +4,8 @@
 // Trạng thái gửi cho mỗi người KHÁC NHAU (stateFor): ai cũng chỉ thấy vai của mình; người chết không lộ vai tới hết ván.
 // Interface giống các game khác ở games.js, thêm: stateFor(id), canOpen(p), chatBlocked(id), away/back/leave, và `emit` để
 // phát giọng quản trò (sự kiện 'game-cue') tới những người đang mở game.
-import { WW, ROLES, FACTION_NAMES, dealRoles } from '../client/src/games/werewolf/roles.js';
-import { nightTimeline } from '../client/src/games/werewolf/narration.js';
+import { ROLES, FACTION_NAMES, dealRoles } from '../client/src/games/werewolf/roles.js';
+import { nightSteps, CLIP_MS, START_PAUSE_MS, GAP_MS, END_PAUSE_MS } from '../client/src/games/werewolf/narration.js';
 
 // Chỉ để thử: WW_SPEED=20 cho mọi đồng hồ chạy nhanh gấp 20 lần
 const SPEED = Number(process.env.WW_SPEED) || 1;
@@ -15,13 +15,20 @@ const PACK = (role) => !!ROLES[role].pack;
 const FACTION_LABEL = (f) => FACTION_NAMES[f];
 const cleanText = (v) => String(v ?? '').trim().slice(0, 120);
 
-export function makeWerewolf({ players, wallet, notify, onChange, emit }) {
+// cfg: thông số ván chỉnh được ở trang admin (wwDefaults() ở roles.js); server giữ một bản sống dùng chung, đọc mỗi lần cần.
+export function makeWerewolf({ players, wallet, notify, onChange, emit, cfg }) {
   let phase = 'lobby'; // lobby | countdown | night | day | vote | hunter | ended
   let deadline = 0;
   let timers = [];
-  let seats = Array(WW.MAX).fill(null); // bàn chờ: { id, name } hoặc null
+  let seats = Array(cfg.max).fill(null); // bàn chờ: { id, name } hoặc null (số ghế đổi từ lần bàn chờ trống kế tiếp)
+  let matchFee = cfg.fee; // phí và lãi của ván đang chơi, chốt lúc bắt đầu (admin đổi giữa ván cũng không ảnh hưởng)
+  let matchProfit = { ...cfg.profit };
   let ps = []; // người chơi trong ván: { idx, id, cid, name, role, alive, left, lover, used, lastGuard, notes }
   let night = null;
+  let steps = []; // các bước (vai được gọi) của đêm hiện tại
+  const doneMap = new Map(); // khoá lựa chọn -> giá trị: mỗi khung việc chỉ chọn được MỘT lần, không đổi (kể cả bỏ qua)
+  let voteTimer = null;
+  let hunterTimer = null;
   let dealt = new Set(); // các vai đã chia lúc đầu ván (quản trò chỉ gọi những vai này)
   let nightNo = 0;
   let dayNo = 0;
@@ -66,7 +73,7 @@ export function makeWerewolf({ players, wallet, notify, onChange, emit }) {
     clearTimers();
     phase = 'lobby';
     deadline = 0;
-    seats = Array(WW.MAX).fill(null);
+    seats = Array(cfg.max).fill(null);
     ps = [];
     night = null;
     result = null;
@@ -77,8 +84,8 @@ export function makeWerewolf({ players, wallet, notify, onChange, emit }) {
 
   function startCountdown() {
     phase = 'countdown';
-    deadline = Date.now() + T(WW.COUNTDOWN_MS);
-    after(T(WW.COUNTDOWN_MS), beginMatch);
+    deadline = Date.now() + T(cfg.countdownSec * 1000);
+    after(T(cfg.countdownSec * 1000), beginMatch);
   }
 
   function cancelCountdown() {
@@ -91,25 +98,28 @@ export function makeWerewolf({ players, wallet, notify, onChange, emit }) {
   function beginMatch() {
     for (let i = 0; i < seats.length; i++) {
       const s = seats[i];
-      if (s && ptsOf(s.id) < WW.FEE) {
-        notify(s.id, `Bạn không đủ ${WW.FEE} điểm, đã bị mời ra khỏi bàn.`);
+      if (s && ptsOf(s.id) < cfg.fee) {
+        notify(s.id, `Bạn không đủ ${cfg.fee} điểm, đã bị mời ra khỏi bàn.`);
         seats[i] = null;
       }
     }
     const list = seated();
-    if (list.length < WW.MIN) {
+    if (list.length < cfg.min) {
       cancelCountdown();
-      for (const s of list) notify(s.id, `Không đủ ${WW.MIN} người, ván bị huỷ và không ai mất điểm.`);
+      for (const s of list) notify(s.id, `Không đủ ${cfg.min} người, ván bị huỷ và không ai mất điểm.`);
       onChange();
       return;
     }
     const roles = dealRoles(list.length);
     ps = list.map((s, idx) => {
       const p = players.get(s.id);
-      wallet.pay(p.cid, WW.FEE, 'Phí chơi Ma Sói');
+      wallet.pay(p.cid, cfg.fee, 'Phí chơi Ma Sói');
       return { idx, id: s.id, cid: p.cid, name: s.name, fruit: s.fruit, color: s.color, role: roles[idx], alive: true, left: false, lover: null, used: {}, lastGuard: null, notes: [] };
     });
+    matchFee = cfg.fee;
+    matchProfit = { ...cfg.profit };
     dealt = new Set(roles);
+    doneMap.clear();
     nightNo = 0;
     dayNo = 0;
     cubExtra = false;
@@ -130,27 +140,56 @@ export function makeWerewolf({ players, wallet, notify, onChange, emit }) {
     votes = new Map();
     announce = [];
     night = { n: nightNo, bite: [], votes: new Map(), window: null, protectedIdx: null, converted: null, victims: [] };
-    const tl = nightTimeline(nightNo, Math.random, dealt);
-    for (const e of tl.events) {
-      if (e.clip === 'dawn') after(T(e.at), () => {
+    steps = nightSteps(nightNo, dealt);
+    emit({ clip: 'night_start' });
+    after(T((CLIP_MS.night_start ?? 0) + START_PAUSE_MS), () => runStep(0));
+    onChange();
+  }
+
+  // Chạy lần lượt từng vai: lời gọi -> khoảng thao tác (xong sớm nếu mọi người của vai đã chọn) -> lời nhắm mắt -> vai kế tiếp
+  function runStep(i) {
+    const step = steps[i];
+    if (!step) {
+      after(T(END_PAUSE_MS), () => {
         emit({ clip: 'dawn' });
         dawn();
       });
-      else after(T(e.at), () => emit({ clip: e.clip }));
+      return;
     }
-    for (const w of tl.windows) {
-      after(T(w.from), () => openWindow(w));
-      after(T(w.to), () => closeWindow(w));
-    }
-    onChange();
+    const clipMs = (c) => CLIP_MS[c] ?? 0;
+    const finish = () => {
+      emit({ clip: step.sleep });
+      after(T(clipMs(step.sleep) + GAP_MS), () => runStep(i + 1));
+    };
+    emit({ clip: step.wake });
+    const win = (key, fallbackMs) => (cfg.windows[key] ?? fallbackMs / 1000) * 1000;
+    after(T(clipMs(step.wake)), () => openWindow(step.role, 'main', win(step.role, step.windowMs), () => {
+      if (!step.then) return finish();
+      emit({ clip: step.then.clip });
+      after(T(clipMs(step.then.clip)), () => openWindow(step.role, 'poison', win('witchPoison', step.then.windowMs), finish));
+    }));
   }
 
   const holder = (role) => ps.filter((r) => r.alive && !r.left && r.role === role);
 
-  function openWindow(w) {
-    night.window = { ...w, to: Date.now() + T(w.to - w.from) };
-    if (w.role === 'alpha' || w.role === 'witch') previewVictims();
+  // Mở khoảng thao tác của một vai. Có người thao tác được thì chờ tối đa windowMs; không ai (người giữ vai đã chết...) thì chờ đúng idleSec giây.
+  function openWindow(role, part, windowMs, done) {
+    night.window = { role, part, to: 0 };
+    night.windowDone = done;
+    if (role === 'alpha' || role === 'witch') previewVictims();
+    const ms = inputActors().length ? windowMs : cfg.idleSec * 1000;
+    night.window.to = Date.now() + T(ms);
+    night.windowTimer = after(T(ms), endWindow);
     onChange();
+  }
+  function endWindow() {
+    const w = night?.window;
+    if (!w) return;
+    clearTimeout(night.windowTimer);
+    closeWindow(w);
+    const next = night.windowDone;
+    night.windowDone = null;
+    next?.();
   }
 
   // Ai sắp chết vì Sói cắn, sau khi trừ người được Bảo Vệ che và người bị Sói Đầu Đàn biến thành Sói
@@ -274,8 +313,8 @@ export function makeWerewolf({ players, wallet, notify, onChange, emit }) {
       hunterIdx = i;
       hunterPick = null;
       phase = 'hunter';
-      deadline = Date.now() + T(WW.HUNTER_MS);
-      after(T(WW.HUNTER_MS), finishHunter);
+      deadline = Date.now() + T(cfg.hunterSec * 1000);
+      hunterTimer = after(T(cfg.hunterSec * 1000), finishHunter);
       onChange();
       return;
     }
@@ -321,18 +360,20 @@ export function makeWerewolf({ players, wallet, notify, onChange, emit }) {
     dayNo++;
     phase = 'day';
     votes = new Map();
-    deadline = Date.now() + T(WW.DAY_MS);
-    after(T(WW.DAY_MS), startVote);
+    deadline = Date.now() + T(cfg.daySec * 1000);
+    after(T(cfg.daySec * 1000), startVote);
     onChange();
   }
   function startVote() {
     phase = 'vote';
-    deadline = Date.now() + T(WW.VOTE_MS);
+    deadline = Date.now() + T(cfg.voteSec * 1000);
     emit({ clip: 'vote_start' });
-    after(T(WW.VOTE_MS), endVote);
+    voteTimer = after(T(cfg.voteSec * 1000), endVote);
     onChange();
   }
   function endVote() {
+    if (phase !== 'vote') return;
+    clearTimeout(voteTimer);
     const tally = new Map();
     for (const r of alive()) {
       const t = votes.get(r.idx);
@@ -367,46 +408,46 @@ export function makeWerewolf({ players, wallet, notify, onChange, emit }) {
   function endMatch(win) {
     clearTimers();
     phase = 'ended';
-    deadline = Date.now() + T(WW.END_MS);
+    deadline = Date.now() + T(cfg.endSec * 1000);
     const label = `${FACTION_LABEL(win)} thắng!`;
     const payouts = ps.map((r) => {
       const wins = ROLES[r.role].faction === win && !r.left;
-      const amt = wins ? WW.PAYOUT[win] : 0;
+      const amt = wins ? matchFee + matchProfit[win] : 0;
       if (amt) give(r, amt, `Thắng Ma Sói (${FACTION_LABEL(win)})`);
-      return { name: r.name, delta: amt - WW.FEE, left: r.left };
+      return { name: r.name, delta: amt - matchFee, left: r.left };
     });
     result = { winner: win, label, payouts };
     emit({ clip: win === 'dan' ? 'win_dan' : 'win_other' });
-    after(T(WW.END_MS), toLobby);
+    after(T(cfg.endSec * 1000), toLobby);
     onChange();
   }
 
   // Còn quá ít người thật thì huỷ ván, hoàn phí cho những người còn lại
   function checkVoid() {
-    if (!running() || humans().length >= WW.MIN_HUMANS) return;
+    if (!running() || humans().length >= cfg.minHumans) return;
     clearTimers();
     for (const r of humans()) {
-      give(r, WW.FEE, 'Ván Ma Sói bị huỷ, hoàn phí');
+      give(r, matchFee, 'Ván Ma Sói bị huỷ, hoàn phí');
       notify(r.id, 'Còn quá ít người, ván Ma Sói bị huỷ và bạn được hoàn phí.');
     }
     phase = 'ended';
-    deadline = Date.now() + T(WW.END_MS);
+    deadline = Date.now() + T(cfg.endSec * 1000);
     result = { winner: null, label: 'Ván bị huỷ, hoàn phí cho người còn lại.', payouts: [] };
-    after(T(WW.END_MS), toLobby);
+    after(T(cfg.endSec * 1000), toLobby);
   }
 
   // ----- thao tác của người chơi -----
   const aliveIdx = (i) => Number.isInteger(i) && ps[i]?.alive;
 
   // Khung việc đang mở cho người này: { kind: 'pick1' | 'pick2' | 'yesno' | 'info', text, targets? } hoặc null
-  function promptFor(r) {
+  function rawPrompt(r) {
     if (r.left) return null;
     const others = alive().filter((o) => o.idx !== r.idx).map((o) => o.idx);
     if (phase === 'hunter') {
       return r.idx === hunterIdx ? { kind: 'pick1', key: 'hunter', text: 'Bạn là Thợ Săn đã chết. Chọn một người chết theo.', targets: others, allowSkip: true, deadline } : null;
     }
     if (!r.alive) return null;
-    if (phase === 'day') return { kind: 'info', text: 'Thảo luận bằng mic và khung chat. Hết giờ sẽ bỏ phiếu.' };
+    if (phase === 'day') return { kind: 'info', text: 'Thảo luận bằng mic (bật hoặc tắt tuỳ ý) hoặc khung chat. Hết 120 giây mới được bỏ phiếu.' };
     if (phase === 'vote') return { kind: 'pick1', key: 'vote', text: 'Chọn người để treo cổ (hoặc bỏ qua).', targets: others, allowSkip: true, deadline };
     if (phase !== 'night' || !night.window) return null;
     const { role, part, to } = night.window;
@@ -451,9 +492,42 @@ export function makeWerewolf({ players, wallet, notify, onChange, emit }) {
     }
   }
 
+  // Khung việc của người này kèm trạng thái đã chọn chưa (done) và đã chọn gì (chosen)
+  function promptFor(r) {
+    const p = rawPrompt(r);
+    if (p?.key) {
+      const k = actKey(r, p);
+      if (doneMap.has(k)) {
+        p.done = true;
+        p.chosen = doneMap.get(k);
+      }
+    }
+    return p;
+  }
+  const actKey = (r, p) => `${r.idx}|${p.key}|${phase}|${nightNo}|${dayNo}|${night?.window?.part ?? ''}`;
+  const isDone = (r) => {
+    const p = rawPrompt(r);
+    return !p?.key || doneMap.has(actKey(r, p));
+  };
+  // Những người đang có việc phải chọn (không tính khung chỉ để xem)
+  const inputActors = () => ps.filter((r) => r.alive && !r.left && ((p) => p && p.kind !== 'info')(rawPrompt(r)));
+
+  // Sau mỗi lựa chọn: mọi người của khung việc đã chọn xong thì kết thúc sớm, không chờ hết giờ
+  function afterAct() {
+    if (phase === 'night' && night?.window) {
+      const actors = inputActors();
+      if (actors.length && actors.every(isDone)) endWindow();
+    } else if (phase === 'vote') {
+      if (ps.filter((r) => r.alive && !r.left).every(isDone)) endVote();
+    } else if (phase === 'hunter') {
+      clearTimeout(hunterTimer);
+      finishHunter();
+    }
+  }
+
   function doAct(r, d) {
     const p = promptFor(r);
-    if (!p || p.kind === 'info') return false;
+    if (!p || p.kind === 'info' || p.done) return false; // chỉ chọn được một lần
     const v = d.value;
     if (p.kind === 'pick1') {
       if (v == null) {
@@ -478,6 +552,8 @@ export function makeWerewolf({ players, wallet, notify, onChange, emit }) {
       case 'psychic': night.psy = v; break;
       default: return false;
     }
+    doneMap.set(actKey(r, p), v ?? null);
+    afterAct();
     return true;
   }
 
@@ -504,7 +580,7 @@ export function makeWerewolf({ players, wallet, notify, onChange, emit }) {
     const si = seatOf(id);
     if (si >= 0 && (phase === 'lobby' || phase === 'countdown')) {
       seats[si] = null;
-      if (phase === 'countdown' && seated().length < WW.MIN) cancelCountdown();
+      if (phase === 'countdown' && seated().length < cfg.min) cancelCountdown();
       return true;
     }
     const r = recOf(id);
@@ -519,12 +595,12 @@ export function makeWerewolf({ players, wallet, notify, onChange, emit }) {
   return {
     state: () => ({ phase }), // game này luôn dùng stateFor
     brief() {
-      if (phase === 'lobby') return seated().length ? `Bàn chờ ${seated().length}/${WW.MAX} · cần ${WW.MIN} người` : 'Ma Sói · bàn trống';
+      if (phase === 'lobby') return seated().length ? `Bàn chờ ${seated().length}/${seats.length} · cần ${cfg.min} người` : 'Ma Sói · bàn trống';
       if (phase === 'countdown') return 'Ván sắp bắt đầu!';
       if (phase === 'ended') return result?.label ?? 'Ván vừa kết thúc';
       return `Đang chơi · ${alive().length} người còn sống`;
     },
-    canOpen: (p) => !!recOf(p.id) || seatOf(p.id) >= 0 || ptsOf(p.id) >= WW.FEE,
+    canOpen: (p) => !!recOf(p.id) || seatOf(p.id) >= 0 || ptsOf(p.id) >= cfg.fee,
     chatBlocked: (id) => running() && !!recOf(id) && !recOf(id).left,
     // Người đang trong ván mà mic phải tắt: đêm (mọi người), người chết (tới hết ván)
     stateFor(id) {
@@ -534,9 +610,10 @@ export function makeWerewolf({ players, wallet, notify, onChange, emit }) {
         phase,
         now: Date.now(),
         deadline,
-        fee: WW.FEE,
-        min: WW.MIN,
-        max: WW.MAX,
+        fee: running() || phase === 'ended' ? matchFee : cfg.fee,
+        profit: running() || phase === 'ended' ? matchProfit : cfg.profit,
+        min: cfg.min,
+        max: seats.length,
         seats: seats.map((s) => (s ? { name: s.name, fruit: s.fruit, color: s.color } : null)),
         mySeat,
         nightNo,
@@ -546,8 +623,22 @@ export function makeWerewolf({ players, wallet, notify, onChange, emit }) {
       };
       if (!running() && phase !== 'ended') return { ...base, players: [], me: null, log: [], micOff: false };
       const isPack = me && PACK(me.role);
+      // Số phiếu hiện trên đầu mỗi người: bỏ phiếu treo cổ (công khai, Thị Trưởng tính 2) và phiếu cắn của bầy Sói (chỉ Sói thấy)
+      const tally = new Map();
+      if (phase === 'vote') {
+        for (const r of alive()) {
+          const t = votes.get(r.idx);
+          if (t != null) tally.set(t, (tally.get(t) ?? 0) + (r.role === 'thi_truong' ? 2 : 1));
+        }
+      }
+      const wolfTally = new Map();
+      if (isPack && phase === 'night' && night?.window?.role === 'wolf') {
+        for (const [v, t] of night.votes) if (t != null && ps[v]?.alive) wolfTally.set(t, (wolfTally.get(t) ?? 0) + 1);
+      }
       const players = ps.map((r) => ({
         idx: r.idx,
+        votes: tally.get(r.idx) || undefined,
+        wolfVotes: wolfTally.get(r.idx) || undefined,
         name: r.name,
         fruit: r.fruit,
         color: r.color,
@@ -576,11 +667,12 @@ export function makeWerewolf({ players, wallet, notify, onChange, emit }) {
     act(p, d) {
       if (d.op === 'sit') {
         if ((phase !== 'lobby' && phase !== 'countdown') || seatOf(p.id) >= 0) return false;
+        if (phase === 'lobby' && !seated().length && seats.length !== cfg.max) seats = Array(cfg.max).fill(null); // admin vừa đổi số ghế, bàn đang trống thì áp dụng luôn
         // chọn ghế cụ thể nếu còn trống, không thì ghế trống đầu tiên
         const free = Number.isInteger(d.seat) && seats[d.seat] === null ? d.seat : seats.indexOf(null);
         if (free < 0 || free >= seats.length) return false;
-        if (ptsOf(p.id) < WW.FEE) {
-          notify(p.id, `Cần ít nhất ${WW.FEE} điểm để chơi Ma Sói.`);
+        if (ptsOf(p.id) < cfg.fee) {
+          notify(p.id, `Cần ít nhất ${cfg.fee} điểm để chơi Ma Sói.`);
           return false;
         }
         seats[free] = { id: p.id, name: p.name, fruit: players.get(p.id)?.look?.fruit ?? 'none', color: players.get(p.id)?.color };
@@ -588,7 +680,7 @@ export function makeWerewolf({ players, wallet, notify, onChange, emit }) {
       }
       if (d.op === 'stand') return leave(p.id);
       if (d.op === 'start') {
-        if (phase !== 'lobby' || seatOf(p.id) < 0 || seated().length < WW.MIN) return false;
+        if (phase !== 'lobby' || seatOf(p.id) < 0 || seated().length < cfg.min) return false;
         startCountdown();
         return true;
       }
@@ -605,7 +697,7 @@ export function makeWerewolf({ players, wallet, notify, onChange, emit }) {
       away.set(id, setTimeout(() => {
         away.delete(id);
         if (leave(id)) onChange();
-      }, T(WW.AWAY_MS)));
+      }, T(cfg.awaySec * 1000)));
       return true;
     },
     back(id) {

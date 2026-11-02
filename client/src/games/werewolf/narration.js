@@ -2,8 +2,8 @@
 // thời gian chờ mỗi vai. File thuần dữ liệu (không dùng DOM), cả server (đếm giờ) và client (phát tiếng) cùng đọc.
 //
 // Mỗi đêm quản trò chỉ gọi các vai CÓ TRONG VÁN này (theo bài đã chia lúc đầu), theo thứ tự cố định. Vai đã chia mà người giữ
-// đã chết vẫn được gọi và chờ như bình thường (để người ngoài không biết vai đó đã chết). Đổi lại, nghe lời gọi là biết ván có
-// những vai nào. Server chỉ mở khung thao tác cho người đang sống giữ vai đó trong khoảng chờ của vai.
+// đã chết vẫn được gọi và chờ đúng idleSec giây (mặc định 10, để người ngoài không biết vai đó đã chết). Đổi lại, nghe lời gọi là biết ván có
+// những vai nào. Server chỉ mở khung thao tác cho người đang sống giữ vai đó; khi mọi người của vai đã chọn xong thì sang vai kế tiếp.
 
 export const GM_DIR = '/gm/';
 export const clipUrl = (key) => `${GM_DIR}gm_${key}.mp3`;
@@ -23,7 +23,7 @@ export const CLIP_MS = {
   // psychic_sleep: chưa thu, thiếu file thì bỏ qua (game vẫn chạy, chỉ không có tiếng)
 };
 
-// Thứ tự gọi và việc của từng vai. windowMs = thời gian vai đó được thao tác sau lời gọi.
+// Thứ tự gọi và việc của từng vai. windowMs = thời gian tối đa vai đó được thao tác sau lời gọi (chọn xong sớm thì sang vai kế tiếp).
 // Thứ tự có lý do:
 //  - Thần Tình Yêu và Kẻ Phản Bội chỉ đêm đầu: ghép đôi, nhận ra bầy Sói trước khi có ai bị cắn.
 //  - Ma Sói chọn nạn nhân; Sói Đầu Đàn và Sói Trắng gọi SAU để biết nạn nhân (biến thành Sói / giết thêm một Sói).
@@ -42,11 +42,6 @@ export const NIGHT_ORDER = [
   { role: 'psychic', wake: 'psychic_wake', sleep: 'psychic_sleep', windowMs: 10000 },
 ];
 
-const START_PAUSE_MS = 1500; // sau "Trời tối rồi" cho mọi người kịp nhắm mắt
-const GAP_MS = 800; // nghỉ giữa hai vai
-const END_PAUSE_MS = 1000; // sau vai cuối trước "Trời sáng rồi"
-const JITTER = 0.15; // khoảng chờ mỗi vai lệch ngẫu nhiên ±15%
-
 // Các lá bài (id vai ở roles.js) mà mỗi lời gọi đại diện; ván không có lá nào trong danh sách thì bỏ qua lời gọi đó.
 // Bầy Sói (wolf) gọi chung cho Ma Sói, Sói Con, Sói Đầu Đàn và Sói Trắng.
 export const CALL_CARDS = {
@@ -61,40 +56,12 @@ export const CALL_CARDS = {
   psychic: ['ngoai_cam'],
 };
 
-// Dựng lịch của một đêm (đêm thứ `night`, tính từ 1). `dealt` là tập id vai đã chia trong ván (không truyền thì gọi hết). Trả về:
-//   events  [{ at, clip }]         thời điểm (ms từ đầu đêm) phát từng file; clip thiếu file thì client bỏ qua
-//   windows [{ role, part, from, to }]  khoảng thời gian vai được thao tác; part 'main' hoặc 'poison' (Phù Thủy)
-//   totalMs thời gian cả đêm tới lúc phát "Trời sáng rồi" xong
-// `rand` chỉ để thử (mặc định Math.random).
-export function nightTimeline(night, rand = Math.random, dealt = null) {
-  const events = [];
-  const windows = [];
-  let t = 0;
-  const play = (clip) => {
-    events.push({ at: t, clip });
-    t += CLIP_MS[clip] ?? 0; // thiếu file (chưa thu) thì không tốn thời gian đọc
-  };
-  const wait = (ms) => Math.round(ms * (1 + (rand() * 2 - 1) * JITTER));
+export const START_PAUSE_MS = 1500; // sau "Trời tối rồi" cho mọi người kịp nhắm mắt
+export const GAP_MS = 800; // nghỉ giữa hai vai
+export const END_PAUSE_MS = 1000; // sau vai cuối trước "Trời sáng rồi"
 
-  play('night_start');
-  t += START_PAUSE_MS;
-  for (const step of NIGHT_ORDER) {
-    if (step.when && !step.when(night)) continue;
-    if (dealt && !CALL_CARDS[step.role].some((r) => dealt.has(r))) continue; // vai này không có trong ván
-    play(step.wake);
-    let w = wait(step.windowMs);
-    windows.push({ role: step.role, part: 'main', from: t, to: t + w });
-    t += w;
-    if (step.then) {
-      play(step.then.clip);
-      w = wait(step.then.windowMs);
-      windows.push({ role: step.role, part: 'poison', from: t, to: t + w });
-      t += w;
-    }
-    play(step.sleep);
-    t += GAP_MS;
-  }
-  t += END_PAUSE_MS - GAP_MS;
-  play('dawn');
-  return { events, windows, totalMs: t };
+// Các bước của đêm thứ `night` (tính từ 1), theo thứ tự gọi, chỉ gồm vai có trong ván (`dealt` = tập id vai đã chia; không truyền thì gọi hết).
+// Server chạy từng bước: phát lời gọi, mở khoảng thao tác (tối đa windowMs, xong sớm nếu mọi người của vai đó đã chọn), phát lời nhắm mắt.
+export function nightSteps(night, dealt = null) {
+  return NIGHT_ORDER.filter((step) => (!step.when || step.when(night)) && (!dealt || CALL_CARDS[step.role].some((r) => dealt.has(r))));
 }

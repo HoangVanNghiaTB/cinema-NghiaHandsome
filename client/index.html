@@ -75,6 +75,9 @@
       }
       #game .head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
       #game h2 { margin: 0; font-size: 18px; color: #ffd36b; }
+      #game .head .right { display: flex; gap: 6px; align-items: center; }
+      #game-mic.on { background: #0a8a4a; color: #fff; border-color: #0a8a4a; }
+      #game-mic:disabled { opacity: 0.5; }
       #game h4 { margin: 8px 0 3px; font-size: 13px; color: #6bd1ff; }
       #game button { font-size: 14px; padding: 7px 12px; cursor: pointer; }
       #game-body { flex: 1; min-height: 0; position: relative; }
@@ -425,7 +428,10 @@
       <div class="box">
         <div class="head">
           <h2 id="game-title"></h2>
-          <button id="game-close">Đóng (Esc)</button>
+          <div class="right">
+            <button id="game-mic">🎙️ Mic (M)</button>
+            <button id="game-close">Đóng (Esc)</button>
+          </div>
         </div>
         <div id="game-body"></div>
       </div>

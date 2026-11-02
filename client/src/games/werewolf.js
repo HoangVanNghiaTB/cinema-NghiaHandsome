@@ -37,6 +37,8 @@ function ensureStyle() {
     .ww-avatar.dead { filter:grayscale(1) brightness(.6); }
     .ww-avatar.empty { background:rgba(255,255,255,.08); border-style:dashed; font-size:18px; color:#aaa; }
     .ww-avatar.sitme { cursor:pointer; }
+    .ww-votes { position:absolute; left:-40px; width:80px; top:-52px; text-align:center; font-size:20px; line-height:1; letter-spacing:2px; color:#ff5d5d; text-shadow:0 1px 3px #000; pointer-events:none; }
+    .ww-votes.wolf { color:#c58bff; }
     .ww-badge { position:absolute; right:-8px; top:-10px; font-size:15px; }
     .ww-dead { position:absolute; left:0; right:0; top:0; bottom:0; display:flex; align-items:center; justify-content:center; font-size:24px; }
     .ww-name { position:absolute; left:-46px; width:92px; top:26px; text-align:center; font-size:11px; line-height:1.15; text-shadow:0 1px 2px #000; pointer-events:none; }
@@ -120,17 +122,14 @@ export default {
       a.play().catch(() => audios.delete(a));
     }
 
-    // ----- mic: đêm và người chết bị tắt, ban ngày bật -----
+    // ----- mic: đêm và người chết bị tắt, ban ngày tự do -----
     let lastMicOff = null;
     function applyMic(state) {
       const off = !!state.micOff;
       if (off === lastMicOff) return;
       lastMicOff = off;
       if (off) ctx.mic?.lock(true);
-      else {
-        ctx.mic?.lock(false);
-        if (state.me?.alive && ['day', 'vote', 'hunter'].includes(state.phase)) ctx.mic?.set(true);
-      }
+      else ctx.mic?.lock(false); // ban ngày mic bật tắt tự do (trả về như trước đêm); không có mic thì nhắn bằng khung chat
     }
 
     const secLeft = (deadline) => Math.max(0, Math.ceil((deadline - (Date.now() - offset)) / 1000));
@@ -214,7 +213,7 @@ export default {
       s.players.forEach((p, i) => {
         table.appendChild(seatEl(i, n, (seat) => {
           const a = avatarOf(p);
-          const selectable = prompt && prompt.kind !== 'info' && prompt.kind !== 'yesno' && prompt.targets?.includes(p.idx);
+          const selectable = prompt && !prompt.done && prompt.kind !== 'info' && prompt.kind !== 'yesno' && prompt.targets?.includes(p.idx);
           if (p.isMe) a.classList.add('me');
           if (!p.alive) a.classList.add('dead');
           if (selectable) {
@@ -230,7 +229,14 @@ export default {
               render();
             });
           }
-          if (picked.includes(p.idx)) a.classList.add('chosen');
+          const chosen = prompt?.done ? [].concat(prompt.chosen ?? []) : picked;
+          if (chosen.includes(p.idx)) a.classList.add('chosen');
+          const nv = p.votes ?? p.wolfVotes;
+          if (nv) {
+            const v = el('div', `ww-votes${p.votes ? '' : ' wolf'}`, nv <= 6 ? '●'.repeat(nv) : `● ×${nv}`);
+            v.title = `${nv} phiếu`;
+            seat.appendChild(v);
+          }
           if (!p.alive) a.appendChild(el('div', 'ww-dead', '💀'));
           if (p.mayor && p.alive) a.appendChild(el('div', 'ww-badge', '👑'));
           if (p.left) a.appendChild(el('div', 'ww-badge', '🚪'));
@@ -264,17 +270,37 @@ export default {
     }
 
     // ----- khung bên phải -----
+    // Mô tả điều bạn đã chọn (mỗi khung chỉ chọn được một lần)
+    function chosenText(prompt) {
+      const c = prompt.chosen;
+      if (prompt.kind === 'yesno') return `Bạn đã chọn: ${c ? 'Có' : 'Không'}.`;
+      if (c == null) return 'Bạn đã bỏ qua.';
+      const names = [].concat(c).map((i) => s.players[i]?.name ?? '?');
+      return `Bạn đã chọn: ${names.join(' và ')}.`;
+    }
+
+    // Cảnh báo: mỗi lựa chọn chỉ có một lần, bấm nhầm là mất
+    function warning(prompt) {
+      const w = el('div', '', prompt.key === 'vote' ? '⚠️ Vote cho chuẩn: bấm nhầm là mất phiếu, không đổi được!' : '⚠️ Chọn cho chuẩn: bấm nhầm là mất lượt, không đổi được!');
+      w.style.cssText = 'color:#ffb74d;font-weight:bold;font-size:12px;margin-top:4px';
+      return w;
+    }
+
     function promptBox(prompt) {
       const parts = [el('div', '', prompt.text)];
       if (prompt.info?.length) parts.push(el('div', 'g-dim', prompt.info.join(' · ')));
       const row = el('div');
       row.style.cssText = 'display:flex;gap:6px;margin-top:6px;flex-wrap:wrap';
-      if (prompt.kind === 'yesno') {
-        row.append(btn('Có', () => { picked = [1]; send({ op: 'act', value: true }); render(); }), btn('Không', () => { picked = [0]; send({ op: 'act', value: false }); render(); }));
-        if (picked.length) parts.push(el('div', 'g-dim', picked[0] ? 'Đã chọn: Có' : 'Đã chọn: Không'));
+      if (prompt.done) {
+        const done = el('div', '', `✔ ${chosenText(prompt)}`);
+        done.style.cssText = 'color:#7be08a;font-weight:bold;margin-top:4px';
+        parts.push(done, el('div', 'g-dim', 'Không đổi được nữa, chờ người khác.'));
+      } else if (prompt.kind === 'yesno') {
+        row.append(btn('Có', () => send({ op: 'act', value: true })), btn('Không', () => send({ op: 'act', value: false })));
+        parts.push(warning(prompt));
       } else if (prompt.kind !== 'info') {
-        parts.push(el('div', 'g-dim', prompt.kind === 'pick2' ? `Bấm hai người trên bàn (${picked.length}/2)` : 'Bấm vào một người trên bàn'));
-        if (prompt.allowSkip) row.append(btn('Bỏ qua', () => { picked = []; send({ op: 'act', value: null }); render(); }));
+        parts.push(el('div', 'g-dim', prompt.kind === 'pick2' ? `Bấm hai người trên bàn (${picked.length}/2)` : 'Bấm vào một người trên bàn'), warning(prompt));
+        if (prompt.allowSkip) row.append(btn('Bỏ qua', () => send({ op: 'act', value: null })));
       }
       parts.push(row);
       const b = panel(...parts);
@@ -331,7 +357,7 @@ export default {
       const n = s.seats.filter(Boolean).length;
       const poor = (ctx.wallet?.().pts ?? 0) < s.fee;
       right.append(
-        panel(el('b', '', `Mỗi ván mất ${s.fee} điểm/người`), el('div', 'g-dim', `Cần ${s.min} đến ${s.max} người ngồi. Thắng được lãi: Dân +50, Sói và phe thứ ba +100. Ngồi rồi đứng dậy trước khi ván bắt đầu thì không mất điểm.`)),
+        panel(el('b', '', `Mỗi ván mất ${s.fee} điểm/người`), el('div', 'g-dim', `Cần ${s.min} đến ${s.max} người ngồi. Thắng được lãi: Dân +${s.profit.dan}, Sói +${s.profit.soi}, Chán Đời +${s.profit.chan_doi}, Sói Trắng +${s.profit.soi_trang}. Ngồi rồi đứng dậy trước khi ván bắt đầu thì không mất điểm.`)),
       );
       if (s.mySeat < 0) {
         right.appendChild(el('div', 'g-dim', poor ? `Cần ít nhất ${s.fee} điểm.` : 'Bấm vào một ghế trống để ngồi.'));
@@ -407,7 +433,6 @@ export default {
         }
         drawMatchTable(me?.prompt);
         drawMatchRight();
-        if (me && !me.left) micInfo.textContent = s.micOff ? '🔇 Mic bị tắt' : '🎙️ Mic được bật';
       }
       right.scrollTop = keepScroll;
       tick();

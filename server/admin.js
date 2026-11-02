@@ -4,12 +4,19 @@ import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import express from 'express';
+import { WW_FIELDS, wwDefaults } from '../client/src/games/werewolf/roles.js';
 
 const TOKEN_MS = 12 * 60 * 60 * 1000;
 const MAX_FAILS = 6;
 const FAIL_WINDOW_MS = 10 * 60 * 1000;
 const KEEPALIVE_EVERY_MS = 10 * 60 * 1000; // ngủ sau 15 phút, nên ping mỗi 10 phút
 const digest = (v) => createHash('sha256').update(String(v ?? '')).digest();
+const getPath = (o, path) => path.split('.').reduce((a, k) => a?.[k], o);
+const setPath = (o, path, v) => {
+  const parts = path.split('.');
+  const last = parts.pop();
+  parts.reduce((a, k) => a[k], o)[last] = v;
+};
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, Number.isFinite(+v) ? +v : lo));
 
 // Tự gọi /healthz của chính mình qua địa chỉ công khai: yêu cầu đi vào qua bộ cân bằng tải nên được tính là có truy cập.
@@ -113,6 +120,7 @@ export function createAdmin(app, { rooms, settings, bans, clientIp }) {
       },
       keepAlive: keepAlive.state(),
       settings,
+      wwFields: WW_FIELDS,
       rooms: rooms.map((r) => r.admin.info()),
       bans: [...bans].filter(([, until]) => until > now).map(([key, until]) => ({ key, until: until === Infinity ? null : until })),
       log,
@@ -184,6 +192,25 @@ export function createAdmin(app, { rooms, settings, bans, clientIp }) {
     note(`${b.op === 'spawn' ? 'Thả rác' : 'Dọn rác'} phòng ${r.cfg.name}`);
   }));
   router.post('/settings', act((b) => {
+    if (b.werewolfReset) {
+      // về mặc định nhưng giữ nguyên các object (game đang giữ tham chiếu tới chúng)
+      const d = wwDefaults();
+      for (const f of WW_FIELDS) setPath(settings.werewolf, f.path, getPath(d, f.path));
+      note('Ma Sói: về thông số mặc định');
+    }
+    if (b.werewolf && typeof b.werewolf === 'object') {
+      const changed = [];
+      for (const f of WW_FIELDS) {
+        const v = getPath(b.werewolf, f.path);
+        if (v === undefined) continue;
+        setPath(settings.werewolf, f.path, Math.round(clamp(v, f.min, f.max)));
+        changed.push(f.path);
+      }
+      const w = settings.werewolf;
+      if (w.max < w.min) w.max = w.min; // ghế không ít hơn số người tối thiểu
+      if (w.minHumans > w.min) w.minHumans = w.min;
+      if (changed.length) note(`Ma Sói: chỉnh ${changed.length} thông số`);
+    }
     if (b.startPoints !== undefined) {
       settings.startPoints = Math.floor(clamp(b.startPoints, 0, 100000));
       note(`Điểm khi mới vào: ${settings.startPoints}`);

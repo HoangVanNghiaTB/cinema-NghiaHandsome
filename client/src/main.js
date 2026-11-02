@@ -1203,6 +1203,21 @@ function closeGame() {
   gameHost.close();
 }
 $('game-close').addEventListener('click', closeGame);
+// Nút mic ngay trong cửa sổ game (máy tính và điện thoại): đang mở game thì phím M của rạp không dùng được vì con trỏ đã nhả ra
+const gameMicBtn = $('game-mic');
+function updateGameMic() {
+  if (!gameOpen) return;
+  gameMicBtn.classList.toggle('on', voiceMode === 'mic' && micOn);
+  gameMicBtn.disabled = micLocked || voiceMode === 'listen-only';
+  gameMicBtn.textContent = micLocked ? '🔇 Mic bị tắt' : voiceMode === 'listen-only' ? '🔇 Không có mic' : micOn ? '🎙️ Mic bật (M)' : '🎙️ Mic tắt (M)';
+}
+function gameToggleMic() {
+  if (voiceMode === null) startVoice().then(updateGameMic);
+  else toggleMic();
+  updateGameMic();
+}
+gameMicBtn.addEventListener('click', gameToggleMic);
+setInterval(updateGameMic, 300); // trạng thái mic có thể đổi do game (tắt ban đêm...) hoặc do chỗ khác
 $('leave').addEventListener('click', leaveRoom);
 // Ví điểm (tặng điểm, cửa hàng): phím P, hoặc nút 💰 cạnh nút ẩn/hiện phím ảo trên điện thoại
 function openWallet() {
@@ -1213,6 +1228,8 @@ $('btn-wallet').addEventListener('click', openWallet);
 
 addEventListener('keydown', (e) => {
   if (gameOpen && e.code === 'Escape') closeGame();
+  // phím M trong cửa sổ game (không khi đang gõ chữ)
+  if (gameOpen && e.code === 'KeyM' && !e.repeat && !['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) gameToggleMic();
 });
 
 // Nhặt món rác đang đứng gần: vung tay xuống nhặt, server xét ai nhặt trước. Trả về true nếu có rác để nhặt.

@@ -53,6 +53,13 @@ export function createWallet(io, players) {
       notify(cid, -price, `Mua ${label}`);
       return null;
     },
+    // Admin: đặt thẳng số điểm (không âm)
+    setPts(cid, n, reason) {
+      const a = account(cid);
+      const before = a.pts;
+      a.pts = Math.max(0, Math.floor(n));
+      notify(cid, reason ? a.pts - before : 0, reason);
+    },
     reset() {
       accounts = new Map();
     },

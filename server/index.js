@@ -11,6 +11,9 @@ import { SING_COST, SING_PROMPT_MS, TIP_AMOUNTS } from '../client/src/economy.js
 import { ROOMS, MAX_PLAYERS } from '../client/src/rooms.js';
 import { createGames } from './games.js';
 import { createWallet } from './wallet.js';
+import { createTrash } from './trash.js';
+import { createAdmin } from './admin.js';
+import { TRASH_EVERY_MS, TRASH_MAX } from '../client/src/economy.js';
 
 const PORT = process.env.PORT || 3000;
 const SEAT_COUNT = 18; // phải khớp SEATS.length ở client/src/scene/cinema.js
@@ -42,6 +45,21 @@ if (process.env.TURN_URL) {
 
 const app = express();
 
+// Cài đặt chỉnh được lúc đang chạy qua trang admin (server/admin.js); khởi động lại thì về mặc định
+const settings = { trash: { enabled: true, everyMs: TRASH_EVERY_MS, max: TRASH_MAX } };
+
+// Cấm vào: khoá `cid:<clientId>` hoặc `ip:<địa chỉ>` -> thời điểm hết cấm (Infinity = tới khi server khởi động lại)
+const bans = new Map();
+const isBanned = (...keys) => {
+  const now = Date.now();
+  return keys.some((k) => {
+    const until = bans.get(k);
+    if (until === undefined) return false;
+    if (until <= now) bans.delete(k);
+    return until > now;
+  });
+};
+
 // Mật khẩu phòng khoá nằm ở biến môi trường ROOM_PASSWORD_<ID viết hoa> (ví dụ ROOM_PASSWORD_AE), KHÔNG ghi vào code vì repo công khai.
 // Phòng khoá mà chưa đặt biến thì không ai vào được (báo "chưa cài mật khẩu").
 const secretOf = (cfg) => (cfg.locked ? process.env[`ROOM_PASSWORD_${cfg.id.toUpperCase()}`] || '' : null);
@@ -60,6 +78,7 @@ const io = new Server(httpServer, isProd ? {} : { cors: { origin: true } });
 
 // Mỗi phòng là một namespace socket.io riêng (/ae, /khach1, ...) với người chơi, video, bảng âm, điểm và game riêng.
 function createRoom(nsp, cfg) {
+  const roomStart = Date.now();
   // Bảng chỉnh âm mic hát: cả phòng dùng chung một bộ thông số (xem client/src/audio/mixParams.js)
   let mix = { ...MIX_DEFAULTS };
 
@@ -69,13 +88,14 @@ function createRoom(nsp, cfg) {
   // Điểm của rạp (xem server/wallet.js) và mini game treo tường (xem server/games.js)
   const wallet = createWallet(nsp, players);
   const games = createGames(nsp, players, wallet);
+  const trash = createTrash(nsp, players, wallet, settings.trash); // rác rơi trong rạp, nhặt để lấy điểm (server/trash.js)
 
   // Phòng trống quá ngần này thì xoá dữ liệu điểm / phụ kiện / xếp hạng game (tải lại trang một mình thì chưa mất)
   const ROOM_RESET_MS = Number(process.env.ROOM_RESET_MS) || 60000;
   let resetTimer = null;
 
   // Người chơi gửi cho người khác: bỏ khoá tài khoản điểm (cid) và các thứ chỉ server dùng
-  const publicPlayer = ({ cid, emoteAt, lastPunchAt, stunnedUntil, immuneUntil, ...pub }) => pub;
+  const publicPlayer = ({ cid, ip, muted, emoteAt, lastPunchAt, stunnedUntil, immuneUntil, ...pub }) => pub;
   const singTimers = new Map(); // id -> hẹn giờ tự xuống sân khấu nếu không xác nhận trả điểm hát
 
   // Rời sân khấu (xuống, bị đánh văng, hết thời gian xác nhận)
@@ -111,6 +131,7 @@ function createRoom(nsp, cfg) {
 
   // Phòng khoá: phải gửi đúng mật khẩu (auth.password) mới nối được; socket sai mật khẩu không bao giờ tới được các xử lý bên dưới
     nsp.use((socket, next) => {
+      if (isBanned(`ip:${clientIp(socket)}`)) return next(new Error('banned'));
       if (!cfg.locked) return next();
       const secret = secretOf(cfg);
       if (!secret) return next(new Error('no-password-configured'));
@@ -134,7 +155,7 @@ function createRoom(nsp, cfg) {
       const p = players.get(socket.id);
       const text = String(data.text ?? '').trim().slice(0, 200);
       const now = Date.now();
-      if (!p || !text || now - lastChatAt < 300) return; // chống spam
+      if (!p || p.muted || !text || now - lastChatAt < 300) return; // chống spam; người bị admin khoá chat thì không gửi được
       lastChatAt = now;
       nsp.emit('chat', { id: p.id, name: p.name, text });
     });
@@ -142,6 +163,12 @@ function createRoom(nsp, cfg) {
     socket.on('join', (data = {}) => {
       if (players.has(socket.id)) return;
       clearTimeout(resetTimer);
+      const joinCid = /^[\w-]{8,64}$/.test(data.clientId) ? data.clientId : socket.id;
+      if (isBanned(`cid:${joinCid}`, `ip:${clientIp(socket)}`)) {
+        socket.emit('banned');
+        socket.disconnect(true);
+        return;
+      }
       if (players.size >= MAX_PLAYERS) {
         socket.emit('room-full');
         socket.disconnect(true);
@@ -152,6 +179,8 @@ function createRoom(nsp, cfg) {
       const player = {
         id: socket.id,
         cid,
+        ip: clientIp(socket),
+        muted: false, // admin khoá chat
         name: cleanName(data.name),
         color: cleanColor(data.color),
         look: limitLook(cleanLook(data.look), wallet.ownedSet(cid)), // phụ kiện chưa mua bị bỏ (xem client/src/scene/looks.js)
@@ -175,7 +204,7 @@ function createRoom(nsp, cfg) {
         video: videoSnapshot(),
         mix,
         games: games.briefs(),
-        self: { look: player.look, wallet: wallet.snapshot(cid) },
+        self: { look: player.look, wallet: wallet.snapshot(cid), trash: trash.list() },
         iceServers,
       });
       socket.broadcast.emit('player-joined', publicPlayer(player));
@@ -323,6 +352,11 @@ function createRoom(nsp, cfg) {
       socket.broadcast.emit('look-update', { id: p.id, look: p.look });
     });
 
+    socket.on('trash-pick', (data = {}) => {
+      const p = players.get(socket.id);
+      if (p && Date.now() >= p.stunnedUntil) trash.pick(p, data.id);
+    });
+
     // Tặng điểm cho người khác (mức trong TIP_AMOUNTS), ví dụ để khen người hát
     socket.on('tip', (data = {}) => {
       const p = players.get(socket.id);
@@ -382,6 +416,7 @@ function createRoom(nsp, cfg) {
       // Phòng trống thì xoá video cũ, trả bảng chỉnh âm về mặc định; điểm, phụ kiện và dữ liệu mini game xoá sau ROOM_RESET_MS
       if (players.size === 0) {
         video = { videoId: null, playing: false, position: 0, updatedAt: Date.now() };
+        trash.clear();
         mix = { ...MIX_DEFAULTS };
         clearTimeout(resetTimer);
         resetTimer = setTimeout(() => {
@@ -393,10 +428,59 @@ function createRoom(nsp, cfg) {
       }
     });
   });
-  return { cfg, count: () => players.size };
+
+  // Giao diện cho trang admin (server/admin.js)
+  const admin = {
+    info: () => ({
+      id: cfg.id,
+      name: cfg.name,
+      locked: !!cfg.locked,
+      ready: !cfg.locked || !!secretOf(cfg),
+      max: MAX_PLAYERS,
+      video: videoSnapshot(),
+      trash: trash.list().length,
+      players: [...players.values()].map((p) => ({
+        id: p.id, cid: p.cid, ip: p.ip, name: p.name, seat: p.seat, stage: p.stage, muted: p.muted, pts: wallet.pts(p.cid),
+      })),
+    }),
+    // Đá người ra; banMs = thời gian cấm vào lại (Infinity: tới khi khởi động lại, cấm cả địa chỉ)
+    kick(id, banMs) {
+      const p = players.get(id);
+      if (!p) return false;
+      bans.set(`cid:${p.cid}`, Date.now() + banMs);
+      if (banMs === Infinity) bans.set(`ip:${p.ip}`, Infinity);
+      const s = nsp.sockets.get(id);
+      s?.emit('banned');
+      s?.disconnect(true);
+      return true;
+    },
+    notice: (text) => nsp.emit('notice', { text }),
+    mute(id, muted) {
+      const p = players.get(id);
+      if (p) p.muted = muted;
+      return !!p;
+    },
+    stopVideo: () => setVideo({ videoId: null, playing: false, position: 0 }),
+    playerByCid: (cid) => [...players.values()].find((p) => p.cid === cid),
+    wallet,
+    trash,
+    // Xoá điểm, phụ kiện, xếp hạng game và rác của phòng
+    resetData() {
+      games.reset();
+      wallet.reset();
+      trash.clear();
+      for (const p of players.values()) wallet.notify(p.cid, 0, '');
+    },
+  };
+  return { cfg, count: () => players.size, admin, startedAt: roomStart };
 }
 
 const rooms = ROOMS.map((cfg) => createRoom(io.of(`/${cfg.id}`), cfg));
+
+// Trang quản lý /admin và các API của nó; giữ server không ngủ (server/admin.js)
+const adminTools = createAdmin(app, { rooms, settings, bans, isBanned, clientIp, io });
+app.get('/healthz', (req, res) => res.type('text').send('ok')); // để dịch vụ ping ngoài (UptimeRobot...) giữ server thức
+adminTools.keepAlive.start();
 
 // Số người đang ở từng phòng (màn hình đăng nhập hiện "x/30") và phòng khoá đã cài mật khẩu chưa
 app.get('/api/rooms', (req, res) => {

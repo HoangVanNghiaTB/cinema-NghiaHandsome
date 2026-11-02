@@ -31,7 +31,7 @@ export function connectToRoom({ name, color, look, room, password }, handlers) {
   const clientId = getClientId();
   const socket = io(`${SERVER_URL ?? ''}/${room}`, { auth: { password: password ?? '' } });
   socket.on('connect_error', (err) => {
-    if (['bad-password', 'no-password-configured', 'too-many'].includes(err.message)) {
+    if (['bad-password', 'no-password-configured', 'too-many', 'banned'].includes(err.message)) {
       socket.disconnect(); // bị từ chối thì không tự thử lại
       handlers.onDenied?.(err.message);
     }
@@ -43,6 +43,8 @@ export function connectToRoom({ name, color, look, room, password }, handlers) {
   });
   socket.on('disconnect', () => handlers.onStatus?.(false));
   socket.on('init', ({ id, players, video, iceServers, mix, games, self }) => handlers.onInit?.(id, players, video, iceServers, mix, games, self));
+  socket.on('trash-add', (t) => handlers.onTrashAdd?.(t));
+  socket.on('trash-gone', (id) => handlers.onTrashGone?.(id));
   socket.on('wallet', (w) => handlers.onWallet?.(w));
   socket.on('notice', (n) => handlers.onNotice?.(n));
   socket.on('game-state', (d) => handlers.onGameState?.(d));
@@ -62,6 +64,10 @@ export function connectToRoom({ name, color, look, room, password }, handlers) {
   socket.on('player-joined', (p) => handlers.onJoin?.(p));
   socket.on('player-moved', (d) => handlers.onMove?.(d));
   socket.on('player-left', (id) => handlers.onLeave?.(id));
+  socket.on('banned', () => {
+    socket.disconnect();
+    handlers.onDenied?.('banned');
+  });
   socket.on('room-full', () => handlers.onFull?.());
 
   return {
@@ -71,6 +77,7 @@ export function connectToRoom({ name, color, look, room, password }, handlers) {
     sing: (stage) => socket.emit('sing', { stage }),
     stopSing: () => socket.emit('stop-sing'),
     singPay: () => socket.emit('sing-pay'),
+    pickTrash: (id) => socket.emit('trash-pick', { id }),
     tip: (to, amt) => socket.emit('tip', { to, amt }),
     buy: (slot, item) => socket.emit('shop-buy', { slot, item }),
     sit: (seat) => socket.emit('sit', { seat }),

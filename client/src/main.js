@@ -14,6 +14,7 @@ import { AvatarHands } from './scene/avatarHands.js';
 import { createSounds, STEP_LENGTH } from './audio/sounds.js';
 import { createYouTubePlayer, parseVideoId } from './player/youtube.js';
 import { Avatars } from './scene/avatars.js';
+import { Trash } from './scene/trash.js';
 import { LOOK_OPTIONS, LOOK_LABELS, SHIRT_COLORS, ITEM_PRICES, itemKey, cleanLook } from './scene/looks.js';
 import { START_POINTS, SING_COST } from './economy.js';
 import { connectToRoom } from './net/socket.js';
@@ -274,6 +275,7 @@ document.querySelectorAll('[data-seek]').forEach((button) => {
   });
 });
 
+const trash = new Trash(scene); // rác trong rạp, nhặt để lấy điểm (server/trash.js)
 const avatars = new Avatars(scene, { onStep: (x, z) => sounds.playStepAt(x, z) });
 // Avatar của chính mình, chỉ hiện ở góc nhìn thứ 3 (không tiếng bước chân vì tiếng của mình đã phát riêng)
 const selfAvatar = new Avatars(scene);
@@ -531,6 +533,7 @@ function leaveRoom() {
   if (!room) return;
   closeGame();
   if (mixerOpen) closeMixer();
+  trash.clear();
   const old = room;
   room = null; // đặt trước để sự kiện ngắt kết nối không báo "mất kết nối"
   old.close();
@@ -568,8 +571,11 @@ function joinRoom(profile) {
   selfAvatar.remove(SELF);
   selfAvatar.add({ id: SELF, name: profile.name, color: profile.color, look: myLook });
   room = connectToRoom({ ...profile, look: myLook }, {
+    onTrashAdd: (t) => trash.add(t),
+    onTrashGone: (id) => trash.remove(id),
     onInit: (id, others, video, iceServers, mix, games, self) => {
       myId = id;
+      trash.set(self?.trash);
       closeGame(); // kết nối lại thì thoát game đang mở
       if (self) {
         setWallet(self.wallet);
@@ -761,6 +767,7 @@ const DENIED_MESSAGES = {
   'bad-password': 'Sai mật khẩu phòng.',
   'no-password-configured': 'Phòng này chưa được cài mật khẩu trên server.',
   'too-many': 'Nhập sai quá nhiều lần, thử lại sau ít phút.',
+  banned: 'Bạn đã bị quản trị viên mời ra khỏi rạp. Thử lại sau ít phút.',
 };
 
 function showLogin(message = '') {
@@ -1186,6 +1193,17 @@ addEventListener('keydown', (e) => {
   if (gameOpen && e.code === 'Escape') closeGame();
 });
 
+// Nhặt món rác đang đứng gần: vung tay xuống nhặt, server xét ai nhặt trước. Trả về true nếu có rác để nhặt.
+function pickTrash() {
+  if (!room || !myId || isStunned() || mySeat !== null || myStage !== null) return false;
+  const id = nearTrash();
+  if (id === null) return false;
+  fpHand.swing();
+  selfAvatar.swing(SELF);
+  room.pickTrash(id);
+  return true;
+}
+
 // Phím E / nút trên điện thoại: đứng dậy, dừng hát, hoặc ngồi/hát nếu đang đứng gần chỗ trống
 function interact() {
   if (!room || !myId || isStunned()) return;
@@ -1197,6 +1215,7 @@ function interact() {
     room.stopSing();
     return;
   }
+  if (isTouch && pickTrash()) return; // điện thoại dùng chung nút hành động; máy tính nhặt rác bằng phím R
   if (nearMixer()) {
     openMixer();
     return;
@@ -1214,6 +1233,9 @@ function interact() {
   if (seat >= 0) room.sit(seat);
 }
 
+// Món rác đang đứng gần (trong tầm nhặt), hoặc null
+const nearTrash = () => trash.nearest(camera.position.x, camera.position.z);
+
 const sitPrompt = $('sit-prompt');
 function updateSitPrompt() {
   // Điện thoại: ngồi/hát thì ẩn cần gạt đi (không đi được), đứng dậy thì hiện lại
@@ -1227,6 +1249,7 @@ function updateSitPrompt() {
   if (isActive()) {
     if (mySeat !== null) text = isTouch ? 'Đứng' : 'Nhấn E để đứng dậy';
     else if (myStage !== null) text = isTouch ? 'Dừng hát' : 'Nhấn E để dừng hát';
+    else if (nearTrash() !== null) text = isTouch ? 'Nhặt rác' : 'Nhấn R để nhặt rác';
     else if (nearMixer()) text = isTouch ? 'Chỉnh âm' : 'Nhấn E để chỉnh âm thanh mic hát';
     else if (nearGamePanel()) text = isTouch ? 'Chơi game' : `Nhấn E để chơi ${nearGamePanel().title.toLocaleLowerCase('vi')}`;
     else if (nearestFreeStage() >= 0) text = isTouch ? 'Hát' : 'Nhấn E để hát';
@@ -1403,6 +1426,7 @@ addEventListener('keydown', (e) => {
   }
   if (e.code === 'KeyM' && !e.repeat) toggleMic();
   else if (e.code === 'KeyE' && !e.repeat) interact();
+  else if (e.code === 'KeyR' && !e.repeat) pickTrash();
   else if (e.code === 'KeyF' && !e.repeat) punch();
   else if (e.code === 'KeyV' && !e.repeat) toggleView();
   else if (EMOTE_KEYS[e.code] && !e.repeat) doEmote(EMOTE_KEYS[e.code]);
@@ -1584,6 +1608,8 @@ function animate() {
     const cy = Math.min(p.y - THIRD_PIVOT_DROP - thirdDir.y * dist, ROOM.height - 0.3);
     camera.position.set(cx, Math.max(cy, floorHeight(cx, cz) + 0.3), cz);
   }
+
+  trash.update(performance.now() / 1000);
 
   const shaking = isStunned();
   if (shaking) {

@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Quản trị rạp</title>
+<style>
+  :root { --bg:#12141a; --card:#1c1f28; --line:#2e3340; --text:#e8eaf0; --dim:#8b92a5; --ok:#4cd97b; --bad:#ff6b6b; --accent:#ffd36b; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui, sans-serif; padding:16px; }
+  h1 { font-size:20px; margin:0 0 12px; }
+  h2 { font-size:15px; margin:0 0 10px; color:var(--accent); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; margin-bottom:14px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(120px, 1fr)); gap:10px; }
+  .stat b { display:block; font-size:20px; }
+  .stat span, .dim { color:var(--dim); font-size:12px; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); }
+  button { background:#2b3040; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:5px 10px; cursor:pointer; font:inherit; }
+  button:hover { background:#383e52; }
+  button.danger { border-color:#7a3030; color:#ffb3b3; }
+  input { background:#0e1016; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:5px 8px; font:inherit; }
+  input[type=number] { width:90px; }
+  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:6px 0; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:middle; }
+  th { color:var(--dim); font-weight:normal; font-size:12px; }
+  .tablewrap { overflow-x:auto; }
+  #login { max-width:320px; margin:20vh auto; }
+  #login input { width:100%; margin:8px 0; }
+  #err { color:var(--bad); min-height:1.4em; }
+  .log div { padding:2px 0; border-bottom:1px solid var(--line); }
+</style>
+</head>
+<body>
+<div id="login" class="card">
+  <h1>Quản trị rạp</h1>
+  <input id="pw" type="password" placeholder="Mật khẩu admin" autocomplete="current-password">
+  <button id="go" style="width:100%">Đăng nhập</button>
+  <div id="err"></div>
+</div>
+<div id="app" hidden>
+  <div class="row"><h1 style="margin:0">Quản trị rạp</h1><span id="updated" class="dim"></span><button id="logout" style="margin-left:auto">Đăng xuất</button></div>
+  <div id="content"></div>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const TOKEN_KEY = 'cinema-admin-token';
+let token = '';
+try { token = sessionStorage.getItem(TOKEN_KEY) || ''; } catch {}
+let state = null;
+let busy = false;
+
+// Dựng DOM bằng textContent (tên người chơi do người dùng đặt nên không chèn thẳng vào HTML)
+function h(tag, props, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(props || {})) {
+    if (k === 'class') el.className = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else if (v !== false && v != null) el[k] = v;
+  }
+  for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid);
+  return el;
+}
+
+async function api(path, body) {
+  const res = await fetch('/api/admin/' + path, {
+    method: body === undefined ? 'GET' : 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && data.error === 'auth') { logout(); throw new Error('Phiên đăng nhập hết hạn.'); }
+  if (!res.ok) throw new Error(data.error || 'Lỗi ' + res.status);
+  return data;
+}
+async function run(path, body) {
+  try { await api(path, body); } catch (e) { alert(e.message); }
+  refresh();
+}
+
+function logout() {
+  token = '';
+  try { sessionStorage.removeItem(TOKEN_KEY); } catch {}
+  $('app').hidden = true;
+  $('login').hidden = false;
+}
+$('logout').onclick = logout;
+$('go').onclick = async () => {
+  $('err').textContent = '';
+  try {
+    const res = await fetch('/api/admin/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: $('pw').value }) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { $('err').textContent = data.error || 'Lỗi ' + res.status; return; }
+    token = data.token;
+    try { sessionStorage.setItem(TOKEN_KEY, token); } catch {}
+    $('pw').value = '';
+    start();
+  } catch { $('err').textContent = 'Không nối được server.'; }
+};
+$('pw').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('go').click(); });
+
+const fmtDur = (s) => { const d = Math.floor(s / 86400), hh = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60); return (d ? d + ' ngày ' : '') + (hh ? hh + ' giờ ' : '') + m + ' phút'; };
+const fmtTime = (t) => new Date(t).toLocaleTimeString('vi');
+const ago = (t) => t ? Math.max(0, Math.round((state.now - t) / 1000)) + ' giây trước' : 'chưa lần nào';
+const stat = (value, label) => h('div', { class: 'stat' }, h('b', {}, String(value)), h('span', {}, label));
+
+function ctl(label, input, apply) {
+  return h('span', { class: 'row', style: 'margin:0' }, label, input, apply);
+}
+
+function renderServer() {
+  const s = state.server, k = state.keepAlive, t = state.settings.trash;
+  const total = state.rooms.reduce((n, r) => n + r.players.length, 0);
+  const everyIn = h('input', { type: 'number', min: 1, max: 14, value: Math.round(k.everyMs / 60000) });
+  const tEvery = h('input', { type: 'number', min: 10, max: 600, value: Math.round(t.everyMs / 1000) });
+  const tMax = h('input', { type: 'number', min: 1, max: 20, value: t.max });
+  return h('div', { class: 'card' },
+    h('h2', {}, 'Server'),
+    h('div', { class: 'grid' },
+      stat(total, 'người đang online'),
+      stat(fmtDur(s.uptimeS), 'đã chạy liên tục'),
+      stat(s.rssMB + ' MB', 'RAM (heap ' + s.heapMB + ' MB)'),
+      stat(s.cpuPct + '%', 'CPU (một lõi)'),
+    ),
+    h('h2', { style: 'margin-top:16px' }, 'Giữ server không ngủ'),
+    k.url
+      ? h('div', {},
+          h('div', { class: 'row' },
+            h('span', {}, 'Tự ping ', h('b', { class: k.enabled ? 'ok' : 'bad' }, k.enabled ? 'đang BẬT' : 'đang TẮT'), ' · ', k.url + '/healthz'),
+          ),
+          h('div', { class: 'row' },
+            h('span', {}, 'Lần cuối: ', ago(k.lastAt), k.lastAt ? [' · ', h('b', { class: k.lastOk ? 'ok' : 'bad' }, k.lastOk ? 'thành công' : 'lỗi ' + k.lastError)] : '', ' · tổng ' + k.count + ' lần'),
+          ),
+          h('div', { class: 'row' },
+            h('button', { onclick: () => run('keepalive', { enabled: !k.enabled }) }, k.enabled ? 'Tắt tự ping' : 'Bật tự ping'),
+            h('button', { onclick: () => run('keepalive', { ping: true }) }, 'Ping thử ngay'),
+            ctl('Mỗi', everyIn, h('button', { onclick: () => run('keepalive', { everySec: Number(everyIn.value) * 60 }) }, 'Lưu (phút)')),
+          ))
+      : h('div', { class: 'dim' }, 'Chưa có địa chỉ để tự ping (Render tự cấp RENDER_EXTERNAL_URL; chạy máy nhà thì đặt KEEPALIVE_URL). Vẫn dùng được dịch vụ ping ngoài.'),
+    h('div', { class: 'dim', style: 'margin-top:8px' },
+      'Tự ping chỉ giữ được khi server đang thức. Để chắc ăn, đặt thêm UptimeRobot hoặc cron-job.org gọi /healthz mỗi 5 phút: nó đánh thức được cả khi server đã ngủ.'),
+    h('h2', { style: 'margin-top:16px' }, 'Rác'),
+    h('div', { class: 'row' },
+      h('button', { onclick: () => run('settings', { trashEnabled: !t.enabled }) }, t.enabled ? 'Đang bật (bấm để tắt)' : 'Đang tắt (bấm để bật)'),
+      ctl('Thả mỗi', tEvery, h('span', {}, 'giây')),
+      ctl('Tối đa', tMax, h('span', {}, 'món')),
+      h('button', { onclick: () => run('settings', { trashEverySec: Number(tEvery.value), trashMax: Number(tMax.value) }) }, 'Lưu'),
+    ),
+    h('div', { class: 'dim' }, 'Cài đặt ở đây về mặc định khi server khởi động lại.'),
+  );
+}
+
+function renderNotice() {
+  const text = h('input', { placeholder: 'Nội dung thông báo...', style: 'flex:1;min-width:180px', maxLength: 200 });
+  const sel = h('select', { style: 'background:#0e1016;color:inherit;border:1px solid var(--line);border-radius:6px;padding:5px' },
+    h('option', { value: '' }, 'Cả rạp'), state.rooms.map((r) => h('option', { value: r.id }, r.name)));
+  return h('div', { class: 'card' }, h('h2', {}, 'Gửi thông báo'),
+    h('div', { class: 'row' }, sel, text, h('button', { onclick: async () => { await run('notice', { room: sel.value || undefined, text: text.value }); text.value = ''; } }, 'Gửi')));
+}
+
+function renderRoom(r) {
+  const cnt = r.players.length;
+  const rows = r.players.map((p) => {
+    const amt = h('input', { type: 'number', value: 50 });
+    const where = p.seat !== null ? 'ghế ' + (p.seat + 1) : p.stage !== null ? 'sân khấu ' + (p.stage + 1) : 'đứng';
+    const pts = (mode, sign) => run('points', { room: r.id, cid: p.cid, mode, amount: sign * Number(amt.value) });
+    return h('tr', {},
+      h('td', {}, h('b', {}, p.name), p.muted ? h('span', { class: 'bad' }, ' (khoá chat)') : ''),
+      h('td', { class: 'dim' }, where),
+      h('td', {}, String(p.pts)),
+      h('td', { class: 'dim' }, p.ip),
+      h('td', {}, h('div', { class: 'row', style: 'margin:0' },
+        amt,
+        h('button', { onclick: () => pts('add', 1) }, '+'),
+        h('button', { onclick: () => pts('add', -1) }, '−'),
+        h('button', { onclick: () => pts('set', 1) }, 'Đặt'),
+        h('button', { onclick: () => run('mute', { room: r.id, id: p.id, muted: !p.muted }) }, p.muted ? 'Mở chat' : 'Khoá chat'),
+        h('button', { class: 'danger', onclick: () => confirm('Đá ' + p.name + ' ra khỏi phòng (không vào lại được 1 phút)?') && run('kick', { room: r.id, id: p.id }) }, 'Đá'),
+        h('button', { class: 'danger', onclick: () => confirm('CẤM ' + p.name + ' (cả địa chỉ ' + p.ip + ') tới khi server khởi động lại?') && run('kick', { room: r.id, id: p.id, ban: true }) }, 'Cấm'),
+      )),
+    );
+  });
+  const v = r.video;
+  return h('div', { class: 'card' },
+    h('div', { class: 'row' },
+      h('h2', { style: 'margin:0' }, r.name + (r.locked ? ' 🔒' : '')),
+      h('span', { class: 'dim' }, cnt + '/' + r.max + ' người'),
+      r.locked && !r.ready ? h('span', { class: 'bad' }, 'chưa cài mật khẩu phòng (ROOM_PASSWORD_' + r.id.toUpperCase() + ')') : '',
+    ),
+    h('div', { class: 'row' },
+      h('span', { class: 'dim' }, v.videoId ? 'Video: ' + v.videoId + (v.playing ? ' (đang chiếu)' : ' (tạm dừng)') : 'Chưa chiếu video'),
+      v.videoId ? h('button', { onclick: () => run('video-stop', { room: r.id }) }, 'Tắt video') : '',
+      h('span', { class: 'dim' }, 'Rác: ' + r.trash),
+      h('button', { onclick: () => run('trash', { room: r.id, op: 'spawn' }) }, 'Thả rác'),
+      h('button', { onclick: () => run('trash', { room: r.id, op: 'clear' }) }, 'Dọn rác'),
+      h('button', { class: 'danger', onclick: () => confirm('Xoá điểm, phụ kiện, xếp hạng game và rác của phòng ' + r.name + '?') && run('reset-room', { room: r.id }) }, 'Xoá dữ liệu phòng'),
+    ),
+    cnt ? h('div', { class: 'tablewrap' }, h('table', {}, h('tr', {}, ['Tên', 'Vị trí', 'Điểm', 'Địa chỉ', 'Thao tác'].map((c) => h('th', {}, c))), rows)) : h('div', { class: 'dim' }, 'Phòng trống.'),
+  );
+}
+
+function renderBans() {
+  if (!state.bans.length) return null;
+  return h('div', { class: 'card' }, h('h2', {}, 'Đang bị cấm'),
+    state.bans.map((b) => h('div', { class: 'row' }, h('span', {}, b.key), h('span', { class: 'dim' }, b.until ? 'đến ' + fmtTime(b.until) : 'tới khi server khởi động lại'),
+      h('button', { onclick: () => run('unban', { key: b.key }) }, 'Bỏ cấm'))));
+}
+
+function renderLog() {
+  return h('div', { class: 'card' }, h('h2', {}, 'Nhật ký thao tác'),
+    h('div', { class: 'log' }, state.log.length ? state.log.map((l) => h('div', {}, h('span', { class: 'dim' }, fmtTime(l.at) + '  '), l.text)) : h('span', { class: 'dim' }, 'Chưa có.')));
+}
+
+function render() {
+  // Đang gõ vào ô nào thì không vẽ lại, tránh mất chữ đang nhập
+  if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
+  $('updated').textContent = 'cập nhật ' + fmtTime(state.now);
+  $('content').replaceChildren(renderServer(), renderNotice(), state.rooms.map(renderRoom), renderBans(), renderLog());
+}
+
+async function refresh() {
+  if (busy || !token) return;
+  busy = true;
+  try { state = await api('state'); render(); } catch {} finally { busy = false; }
+}
+let timer = null;
+function start() {
+  $('login').hidden = true;
+  $('app').hidden = false;
+  refresh();
+  clearInterval(timer);
+  timer = setInterval(refresh, 3000);
+}
+if (token) start();
+</script>
+</body>
+</html>

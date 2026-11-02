@@ -1,4 +1,4 @@
-import { el } from './util.js';
+import { el, watchSize } from './util.js';
 import { ROLES, FACTION_NAMES } from './werewolf/roles.js';
 import { clipUrl, CLIP_TEXT } from './werewolf/narration.js';
 import { FRUITS } from '../scene/looks.js';
@@ -26,6 +26,32 @@ function ensureStyle() {
   const st = document.createElement('style');
   st.id = 'ww-style';
   st.textContent = `
+    .ww-right { flex:1; min-width:170px; max-width:240px; display:flex; flex-direction:column; gap:6px; overflow:auto; }
+    /* Màn hình nhỏ (điện thoại): thu gọn mọi thứ */
+    .ww-compact { gap:3px !important; padding:3px !important; }
+    .ww-compact .ww-table { min-height:0; }
+    .ww-compact .ww-right { min-width:128px; max-width:172px; gap:4px; font-size:12px; }
+    .ww-compact .ww-panel { font-size:11.5px; padding:3px 6px; }
+    .ww-compact .ww-felt { left:22%; right:22%; top:22%; bottom:22%; padding:3%; border-width:4px; }
+    .ww-compact .ww-chair { width:48px; height:34px; left:-24px; top:-28px; }
+    .ww-compact .ww-avatar { width:36px; height:36px; left:-18px; top:-18px; font-size:20px; border-width:2px; }
+    .ww-compact .ww-badge { font-size:12px; right:-6px; top:-8px; }
+    .ww-compact .ww-name { width:76px; left:-38px; top:19px; font-size:9.5px; }
+    .ww-compact .ww-pill { font-size:8.5px; padding:0 3px; }
+    .ww-compact .ww-votes { top:-40px; font-size:15px; }
+    .ww-compact .ww-center-icon { font-size:22px; }
+    .ww-compact .ww-timer { font-size:20px; }
+    .ww-compact .ww-center-text { font-size:10px; }
+    .ww-compact .ww-caption { font-size:9.5px; margin-top:2px; }
+    .ww-compact .ww-win { font-size:15px; margin:0; }
+    .ww-compact .ww-cardwrap { width:110px; height:152px; }
+    .ww-compact .ww-face { padding:4px 5px 3px; border-width:4px; }
+    .ww-compact .ww-card-rank { font-size:9px; }
+    .ww-compact .ww-card-icon { font-size:30px; margin:1px 0 0; }
+    .ww-compact .ww-card-name { font-size:13px; margin-top:0; }
+    .ww-compact .ww-card-ribbon { font-size:9px; margin:1px 0; }
+    .ww-compact .ww-card-desc { font-size:8.5px; line-height:1.2; }
+    .ww-compact .ww-stamp { font-size:18px; }
     .ww-table { position:relative; flex:1.7; min-width:0; min-height:260px; }
     .ww-felt { position:absolute; left:19%; right:19%; top:19%; bottom:19%; border-radius:50%; background:radial-gradient(ellipse at 40% 35%, #3c7a52, #214a33 70%); border:6px solid #6b4423; box-shadow:inset 0 0 30px rgba(0,0,0,.5), 0 6px 20px rgba(0,0,0,.5); display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:8%; box-sizing:border-box; transition:background .6s; }
     .ww-night .ww-felt { background:radial-gradient(ellipse at 40% 35%, #26335a, #0d1226 70%); }
@@ -90,7 +116,7 @@ export default {
     main.style.cssText = 'display:flex;gap:10px;flex:1;min-height:0';
     const table = el('div', 'ww-table');
     const right = el('div');
-    right.style.cssText = 'flex:1;min-width:170px;max-width:240px;display:flex;flex-direction:column;gap:6px;overflow:auto';
+    right.className = 'ww-right';
     main.append(table, right);
     wrap.append(top, main);
     root.appendChild(wrap);
@@ -104,6 +130,7 @@ export default {
     let timerEl = null;
     let cardFace = true; // thẻ bài đang ngửa hay úp (bấm vào thẻ để úp lại, tránh người bên cạnh nhìn trộm)
     let dealtKey = '';
+    let compact = false; // màn hình nhỏ (điện thoại): thu gọn bàn, ghế, thẻ bài cho vừa
     let caption = ''; // lời quản trò mới nhất (chữ), hiện giữa bàn cạnh ghi chú ban đêm / ban ngày
     let captionEl = null;
     // Giọng đọc của quản trò: mỗi người tự bật / tắt (nhớ trong trình duyệt); tắt thì chỉ đọc chữ ở giữa bàn
@@ -197,7 +224,7 @@ export default {
       seat.style.top = `${pos.y}%`;
       const chair = el('div', 'ww-chair');
       chair.style.transform = `rotate(${pos.deg + 90}deg)`;
-      chair.style.transformOrigin = '32px 36px';
+      chair.style.transformOrigin = compact ? '24px 28px' : '32px 36px';
       seat.appendChild(chair);
       build(seat);
       return seat;
@@ -374,7 +401,8 @@ export default {
     }
 
     function chatBox() {
-      const canChat = s.me?.alive && ((s.phase === 'night' && ROLES[s.me.role].pack) || s.phase === 'day' || s.phase === 'vote');
+      const shooting = s.phase === 'hunter' && s.me?.prompt?.key === 'hunter'; // Thợ Săn đã chết nhưng còn chọn người bắn: vẫn chat được
+      const canChat = shooting || (s.me?.alive && ((s.phase === 'night' && ROLES[s.me.role].pack) || s.phase === 'day' || s.phase === 'vote'));
       const log = el('div');
       log.style.cssText = 'flex:1;min-height:60px;max-height:130px;overflow:auto;font-size:12px;background:rgba(0,0,0,.25);border-radius:6px;padding:4px 6px';
       logEl = log;
@@ -444,7 +472,7 @@ export default {
       }
       if (me) {
         right.appendChild(roleCard(me));
-        if (!me.alive) right.appendChild(panel('💀 Bạn đã chết. Mic và chat bị tắt tới hết ván, bạn vẫn xem được.'));
+        if (!me.alive) right.appendChild(panel(me.prompt?.key === 'hunter' ? '💀 Bạn là Thợ Săn đã chết. Trong lúc chọn người bắn bạn vẫn dùng được mic và chat. Bắn xong sẽ bị tắt tới hết ván.' : '💀 Bạn đã chết. Mic và chat bị tắt tới hết ván, bạn vẫn xem được.'));
         else if (me.left) right.appendChild(panel('Bạn đã rời ván.'));
       } else {
         right.appendChild(panel('Bạn đang xem. Ván này đã bắt đầu, chờ ván sau để ngồi chơi.'));
@@ -494,6 +522,17 @@ export default {
       tick();
     }
 
+    // Cỡ cửa sổ nhỏ (điện thoại) thì chuyển sang bố cục thu gọn
+    const applySize = () => {
+      const c = root.clientHeight < 460 || root.clientWidth < 660;
+      if (c === compact) return;
+      compact = c;
+      wrap.classList.toggle('ww-compact', c);
+      render();
+    };
+    const stopWatch = watchSize(root, applySize);
+    applySize();
+
     return {
       state(next) {
         // Đang gõ chat thì không dựng lại cả khung (mất chữ / mất con trỏ): chỉ cập nhật tin nhắn và đồng hồ
@@ -514,6 +553,7 @@ export default {
         playCue(d.clip);
       },
       destroy() {
+        stopWatch();
         clearInterval(timerId);
         for (const a of audios) a.pause();
         audios.clear();

@@ -593,10 +593,12 @@ export function makeWerewolf({ players, wallet, notify, onChange, emit, cfg }) {
   function doChat(r, text) {
     const t = cleanText(text);
     const now = Date.now();
-    if (!t || now - (lastChatAt.get(r.id) ?? 0) < 700 || !r.alive || r.left) return false;
+    const shooting = phase === 'hunter' && r.idx === hunterIdx; // Thợ Săn đã chết nhưng còn đang chọn người bắn: vẫn được chat
+    if (!t || now - (lastChatAt.get(r.id) ?? 0) < 700 || (!r.alive && !shooting) || r.left) return false;
     lastChatAt.set(r.id, now);
     let ch;
-    if (phase === 'night') {
+    if (shooting) ch = 'all';
+    else if (phase === 'night') {
       if (!PACK(r.role)) return false;
       ch = 'wolf';
     } else if (phase === 'day' || phase === 'vote') ch = 'all';
@@ -694,7 +696,9 @@ export function makeWerewolf({ players, wallet, notify, onChange, emit, cfg }) {
         };
       }
       const myLog = log.filter((m) => m.ch === 'all' || (m.ch === 'wolf' && isPack));
-      const micOff = !!me && !me.left && (phase === 'night' || !me.alive) && phase !== 'ended';
+      // Mic: đêm tắt hết; người chết tắt tới hết ván, riêng Thợ Săn còn mic trong lúc chọn người bắn (bắn xong mới tắt)
+      const shooting = !!me && phase === 'hunter' && me.idx === hunterIdx;
+      const micOff = !!me && !me.left && (phase === 'night' || !me.alive) && phase !== 'ended' && !shooting;
       return { ...base, players, me: meOut, log: myLog, micOff };
     },
     act(p, d) {

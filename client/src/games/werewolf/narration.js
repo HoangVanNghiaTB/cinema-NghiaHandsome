@@ -26,17 +26,18 @@ export const CLIP_MS = {
 // Thứ tự gọi và việc của từng vai. windowMs = thời gian tối đa vai đó được thao tác sau lời gọi (chọn xong sớm thì sang vai kế tiếp).
 // Thứ tự có lý do:
 //  - Thần Tình Yêu và Kẻ Phản Bội chỉ đêm đầu: ghép đôi, nhận ra bầy Sói trước khi có ai bị cắn.
+//  - Bảo Vệ gọi TRƯỚC bầy Sói: Sói Đầu Đàn chỉ biến được người bị cắn nếu Bảo Vệ không che người đó, nên phải biết Bảo Vệ che ai trước.
 //  - Ma Sói chọn nạn nhân; Sói Đầu Đàn và Sói Trắng gọi SAU để biết nạn nhân (biến thành Sói / giết thêm một Sói).
-//  - Tiên Tri, Bảo Vệ, Nhà Ngoại Cảm không phụ thuộc ai, nhưng Bảo Vệ phải xong TRƯỚC Phù Thủy.
+//  - Tiên Tri và Nhà Ngoại Cảm không phụ thuộc ai.
 //  - Phù Thủy gọi gần cuối: chỉ khi đó mới biết ai thật sự sắp chết (đã trừ người được Bảo Vệ che và người bị biến thành Sói).
 export const NIGHT_ORDER = [
   { role: 'cupid', wake: 'cupid_wake', sleep: 'cupid_sleep', windowMs: 10000, when: (night) => night === 1 },
   { role: 'traitor', wake: 'traitor_wake', sleep: 'traitor_sleep', windowMs: 4000, when: (night) => night === 1 },
+  { role: 'guard', wake: 'guard_wake', sleep: 'guard_sleep', windowMs: 8000 },
   { role: 'wolf', wake: 'wolf_wake', sleep: 'wolf_sleep', windowMs: 20000 },
   { role: 'alpha', wake: 'alpha_wake', sleep: 'alpha_sleep', windowMs: 8000 },
   { role: 'whitewolf', wake: 'whitewolf_wake', sleep: 'whitewolf_sleep', windowMs: 8000, when: (night) => night % 2 === 0 },
   { role: 'seer', wake: 'seer_wake', sleep: 'seer_sleep', windowMs: 8000 },
-  { role: 'guard', wake: 'guard_wake', sleep: 'guard_sleep', windowMs: 8000 },
   // Phù Thủy hai việc liền nhau: hỏi cứu (wake), rồi hỏi bình độc (poison); mỗi việc một khoảng chờ riêng
   { role: 'witch', wake: 'witch_wake', sleep: 'witch_sleep', windowMs: 10000, then: { clip: 'witch_poison', windowMs: 8000 } },
   { role: 'psychic', wake: 'psychic_wake', sleep: 'psychic_sleep', windowMs: 10000 },

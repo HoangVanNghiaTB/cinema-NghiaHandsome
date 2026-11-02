@@ -211,6 +211,7 @@
       #voice-status.on { opacity: 1; color: #7dff9a; }
       #toasts { position: fixed; top: 74px; left: 12px; z-index: 14; pointer-events: none; display: flex; flex-direction: column; gap: 4px; }
       #toasts .toast { background: rgba(0, 0, 0, 0.7); color: #fff; padding: 3px 9px; border-radius: 6px; font-size: 13px; max-width: 70vw; }
+      body.game-open #chat { display: none; } /* đang mở game thì ẩn khung chat chung của phòng, khỏi đè lên cửa sổ game */
       body.game-open #toasts { top: auto; bottom: 10px; left: 50%; transform: translateX(-50%); align-items: center; } /* đang mở game / ví thì xuống dưới, khỏi đè tiêu đề */
       #toasts .toast.plus { color: #7dff9a; }
       #toasts .toast.minus { color: #ffb38a; }

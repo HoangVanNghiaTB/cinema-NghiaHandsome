@@ -13,7 +13,8 @@ export const wwDefaults = () => ({
   min: 5, // số người tối thiểu để bắt đầu
   max: 10, // số ghế quanh bàn
   countdownSec: 15, // đếm ngược từ lúc bấm Bắt đầu
-  daySec: 120, // thảo luận ban ngày (cố định)
+  daySec: 120, // thảo luận ban ngày
+  skipSec: 60, // sau bấy nhiêu giây thảo luận thì hiện nút Bỏ qua; mọi người còn sống đều bấm thì sang bỏ phiếu ngay
   voteSec: 30, // bỏ phiếu (xong sớm nếu mọi người đã bỏ)
   hunterSec: 15, // Thợ Săn chọn người bắn
   endSec: 25, // xem kết quả rồi về bàn chờ
@@ -34,6 +35,7 @@ export const WW_FIELDS = [
   { group: 'Bàn chờ', path: 'max', label: 'Số ghế (tối đa)', unit: 'người', min: 5, max: 10 },
   { group: 'Bàn chờ', path: 'countdownSec', label: 'Đếm ngược bắt đầu', unit: 'giây', min: 5, max: 60 },
   { group: 'Thời gian', path: 'daySec', label: 'Thảo luận ban ngày', unit: 'giây', min: 30, max: 600 },
+  { group: 'Thời gian', path: 'skipSec', label: 'Hiện nút Bỏ qua thảo luận sau', unit: 'giây', min: 10, max: 600 },
   { group: 'Thời gian', path: 'voteSec', label: 'Bỏ phiếu (tối đa)', unit: 'giây', min: 10, max: 120 },
   { group: 'Thời gian', path: 'hunterSec', label: 'Thợ Săn chọn người bắn', unit: 'giây', min: 5, max: 60 },
   { group: 'Thời gian', path: 'endSec', label: 'Xem kết quả', unit: 'giây', min: 5, max: 60 },
@@ -64,7 +66,7 @@ export const ROLES = {
   tinh_yeu: { name: 'Thần Tình Yêu', faction: 'dan', score: 3, desc: 'Đêm đầu chọn hai người thành một đôi. Một người chết thì người kia chết theo.' },
   ma_soi: { name: 'Ma Sói', faction: 'soi', score: -6, pack: true, wolf: true, desc: 'Cùng bầy Sói chọn một người để cắn mỗi đêm.' },
   soi_con: { name: 'Sói Con', faction: 'soi', score: -8, pack: true, wolf: true, desc: 'Nếu bạn chết, đêm sau bầy Sói được cắn thêm một người.' },
-  soi_dau_dan: { name: 'Sói Đầu Đàn', faction: 'soi', score: -9, pack: true, wolf: true, desc: 'Một lần trong ván, biến người bị cắn thành Sói thay vì giết người đó.' },
+  soi_dau_dan: { name: 'Sói Đầu Đàn', faction: 'soi', score: -9, pack: true, wolf: true, desc: 'Từ đêm 2, một lần, biến người bị cắn thành Sói (không giết). Chỉ khi Sói sau đó vẫn ít hơn số người còn lại và Bảo Vệ không che người đó.' },
   phan_boi: { name: 'Kẻ Phản Bội', faction: 'soi', score: -6, desc: 'Biết Sói là ai và giúp Sói thắng, nhưng Sói không biết bạn. Tiên Tri soi ra là người.' },
   chan_doi: { name: 'Chán Đời', faction: 'chan_doi', score: -2, desc: 'Chỉ thắng nếu bị dân làng treo cổ ban ngày. Thắng thì ván kết thúc ngay.' },
   soi_trang: { name: 'Sói Trắng', faction: 'soi_trang', score: -2, pack: true, wolf: true, desc: 'Ở cùng bầy Sói, cứ hai đêm được giết thêm một Sói khác. Chỉ thắng nếu là người cuối cùng còn sống.' },

@@ -80,7 +80,7 @@ Mình chọn 15 vai **không phụ thuộc chỗ ngồi** (bỏ Hiệp Sĩ Kiế
 |---|---|---|
 | Ma Sói | −6 | Cùng bầy Sói chọn một người để cắn mỗi đêm. |
 | Sói Con | −8 | Khi bị loại, bầy Sói được cắn thêm một người vào đêm kế tiếp. |
-| Sói Đầu Đàn | −9 | Một lần trong ván, biến người bị cắn thành Sói thay vì giết người đó. |
+| Sói Đầu Đàn | −9 | Từ đêm 2, một lần trong ván, biến người bị cắn thành Sói thay vì giết. Chỉ biến được khi sau đó số Sói vẫn ít hơn số người còn lại và Bảo Vệ không che người đó. |
 | Kẻ Phản Bội | −6 | Biết Sói là ai và giúp Sói thắng, nhưng Sói không biết nó. Tiên Tri soi ra là người. |
 
 **Phe thứ ba (2 vai)**

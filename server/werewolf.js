@@ -28,6 +28,8 @@ export function makeWerewolf({ players, wallet, notify, onChange, emit, cfg }) {
   let steps = []; // các bước (vai được gọi) của đêm hiện tại
   const doneMap = new Map(); // khoá lựa chọn -> giá trị: mỗi khung việc chỉ chọn được MỘT lần, không đổi (kể cả bỏ qua)
   let voteTimer = null;
+  let dayTimer = null;
+  let daySkipAt = 0; // từ lúc này (ms) mới hiện nút Bỏ qua thảo luận
   let hunterTimer = null;
   let dealt = new Set(); // các vai đã chia lúc đầu ván (quản trò chỉ gọi những vai này)
   let nightNo = 0;
@@ -114,7 +116,7 @@ export function makeWerewolf({ players, wallet, notify, onChange, emit, cfg }) {
     ps = list.map((s, idx) => {
       const p = players.get(s.id);
       wallet.pay(p.cid, cfg.fee, 'Phí chơi Ma Sói');
-      return { idx, id: s.id, cid: p.cid, name: s.name, fruit: s.fruit, color: s.color, role: roles[idx], alive: true, left: false, lover: null, used: {}, lastGuard: null, notes: [] };
+      return { idx, id: s.id, cid: p.cid, name: s.name, fruit: s.fruit, color: s.color, role: roles[idx], mayor: roles[idx] === 'thi_truong', pub: roles[idx] === 'thi_truong' ? 'thi_truong' : null, alive: true, left: false, lover: null, used: {}, lastGuard: null, notes: [] };
     });
     matchFee = cfg.fee;
     matchProfit = { ...cfg.profit };
@@ -192,6 +194,19 @@ export function makeWerewolf({ players, wallet, notify, onChange, emit, cfg }) {
     next?.();
   }
 
+  // Sói Đầu Đàn có biến được người bị cắn không? Trả về null nếu được, hoặc lý do: 'used' (đã dùng), 'first' (đêm đầu),
+  // 'target' (không có nạn nhân hoặc Bảo Vệ che người đó), 'balance' (sau khi biến Sói sẽ không còn ít hơn số người còn lại, quá mạnh).
+  function convertBlock(a) {
+    if (a.used.convert) return 'used';
+    if (night.n < 2) return 'first';
+    const t = night.bite[0];
+    if (t == null || t === night.protectedIdx) return 'target';
+    const live = alive();
+    const wolves = live.filter((r) => ROLES[r.role].faction === 'soi').length;
+    if (wolves + 1 >= live.length - wolves - 1) return 'balance'; // sau khi biến: Sói = wolves+1, người còn lại = live-wolves-1
+    return null;
+  }
+
   // Ai sắp chết vì Sói cắn, sau khi trừ người được Bảo Vệ che và người bị Sói Đầu Đàn biến thành Sói
   function previewVictims() {
     night.victims = night.bite.filter((t, i) => t !== night.protectedIdx && !(i === 0 && t === night.converted));
@@ -212,7 +227,7 @@ export function makeWerewolf({ players, wallet, notify, onChange, emit, cfg }) {
       finalizeBite();
     } else if (w.role === 'alpha') {
       const a = holder('soi_dau_dan')[0];
-      if (a && night.convert && !a.used.convert && night.bite[0] != null) {
+      if (a && night.convert && convertBlock(a) === null) {
         a.used.convert = true;
         night.converted = night.bite[0];
       }
@@ -361,10 +376,14 @@ export function makeWerewolf({ players, wallet, notify, onChange, emit, cfg }) {
     phase = 'day';
     votes = new Map();
     deadline = Date.now() + T(cfg.daySec * 1000);
-    after(T(cfg.daySec * 1000), startVote);
+    daySkipAt = Date.now() + T(cfg.skipSec * 1000);
+    dayTimer = after(T(cfg.daySec * 1000), startVote);
+    after(T(cfg.skipSec * 1000), onChange); // đến giờ hiện nút Bỏ qua thì báo cho client
     onChange();
   }
   function startVote() {
+    if (phase !== 'day') return;
+    clearTimeout(dayTimer);
     phase = 'vote';
     deadline = Date.now() + T(cfg.voteSec * 1000);
     emit({ clip: 'vote_start' });
@@ -377,7 +396,7 @@ export function makeWerewolf({ players, wallet, notify, onChange, emit, cfg }) {
     const tally = new Map();
     for (const r of alive()) {
       const t = votes.get(r.idx);
-      if (t != null && ps[t]?.alive) tally.set(t, (tally.get(t) ?? 0) + (r.role === 'thi_truong' ? 2 : 1));
+      if (t != null && ps[t]?.alive) tally.set(t, (tally.get(t) ?? 0) + (r.mayor ? 2 : 1));
     }
     const top = Math.max(0, ...tally.values());
     const tops = [...tally].filter(([, c]) => c === top).map(([t]) => t);
@@ -389,7 +408,7 @@ export function makeWerewolf({ players, wallet, notify, onChange, emit, cfg }) {
     const t = ps[tops[0]];
     if (t.role === 'hoang_tu' && !t.used.prince) {
       t.used.prince = true;
-      t.revealed = true;
+      t.pub = 'hoang_tu'; // vai công khai (giữ nguyên dù sau này bị biến thành Sói, để người khác không đoán được)
       announce.push(`${t.name} bị treo cổ nhưng là Hoàng Tử nên không chết!`);
       return startNight();
     }
@@ -447,7 +466,13 @@ export function makeWerewolf({ players, wallet, notify, onChange, emit, cfg }) {
       return r.idx === hunterIdx ? { kind: 'pick1', key: 'hunter', text: 'Bạn là Thợ Săn đã chết. Chọn một người chết theo.', targets: others, allowSkip: true, deadline } : null;
     }
     if (!r.alive) return null;
-    if (phase === 'day') return { kind: 'info', text: 'Thảo luận bằng mic (bật hoặc tắt tuỳ ý) hoặc khung chat. Hết 120 giây mới được bỏ phiếu.' };
+    if (phase === 'day') {
+      // Ban đầu không có khung việc nào (gọn); sau skipSec giây hiện nút Bỏ qua, mọi người còn sống đều bấm thì sang bỏ phiếu ngay
+      if (Date.now() < daySkipAt) return null;
+      const voters = ps.filter((o) => o.alive && !o.left);
+      const n = voters.filter((o) => doneMap.has(actKey(o, { key: 'skipDay' }))).length;
+      return { kind: 'skip', key: 'skipDay', text: `Bỏ qua phần thảo luận? (${n}/${voters.length} người đã bỏ qua)` };
+    }
     if (phase === 'vote') return { kind: 'pick1', key: 'vote', text: 'Chọn người để treo cổ (hoặc bỏ qua).', targets: others, allowSkip: true, deadline };
     if (phase !== 'night' || !night.window) return null;
     const { role, part, to } = night.window;
@@ -462,10 +487,13 @@ export function makeWerewolf({ players, wallet, notify, onChange, emit, cfg }) {
         const seen = [...night.votes].filter(([v]) => ps[v]?.alive).map(([v, t]) => `${ps[v].name} → ${t == null ? '—' : ps[t].name}`);
         return { kind: 'pick1', key: 'wolf', text: cubExtra ? 'Chọn người để cắn (Sói Con đã chết: cắn thêm một người, hai người nhiều phiếu nhất).' : 'Chọn người để cắn.', targets, allowSkip: true, info: seen, deadline: to };
       }
-      case 'alpha':
-        return r.role === 'soi_dau_dan' && !r.used.convert && night.bite[0] != null
-          ? { kind: 'yesno', key: 'alpha', text: `Biến ${ps[night.bite[0]].name} thành Sói thay vì giết? (chỉ một lần)`, deadline: to }
-          : null;
+      case 'alpha': {
+        if (r.role !== 'soi_dau_dan') return null;
+        const why = convertBlock(r);
+        if (why === null) return { kind: 'yesno', key: 'alpha', text: `Biến ${ps[night.bite[0]].name} thành Sói thay vì giết? (chỉ một lần)`, deadline: to };
+        const msg = why === 'used' ? 'Bạn đã dùng quyền biến Sói.' : why === 'first' ? 'Quyền biến Sói chỉ dùng được từ đêm 2.' : 'Đêm nay chưa biến được người bị cắn.';
+        return { kind: 'info', text: msg, deadline: to };
+      }
       case 'whitewolf':
         return r.role === 'soi_trang'
           ? { kind: 'pick1', key: 'whitewolf', text: 'Chọn một Sói khác để giết (hoặc bỏ qua).', targets: alive().filter((o) => PACK(o.role) && o.idx !== r.idx).map((o) => o.idx), allowSkip: true, deadline: to }
@@ -517,6 +545,8 @@ export function makeWerewolf({ players, wallet, notify, onChange, emit, cfg }) {
     if (phase === 'night' && night?.window) {
       const actors = inputActors();
       if (actors.length && actors.every(isDone)) endWindow();
+    } else if (phase === 'day') {
+      if (ps.filter((r) => r.alive && !r.left).every((r) => doneMap.has(actKey(r, { key: 'skipDay' })))) startVote();
     } else if (phase === 'vote') {
       if (ps.filter((r) => r.alive && !r.left).every(isDone)) endVote();
     } else if (phase === 'hunter') {
@@ -537,6 +567,8 @@ export function makeWerewolf({ players, wallet, notify, onChange, emit, cfg }) {
       if (!Array.isArray(v) || v.length !== 2 || v[0] === v[1] || !v.every((i) => p.targets.includes(i))) return false;
     } else if (p.kind === 'yesno') {
       if (typeof v !== 'boolean') return false;
+    } else if (p.kind === 'skip') {
+      if (v !== true) return false;
     }
     switch (p.key) {
       case 'hunter': hunterPick = v; break;
@@ -550,6 +582,7 @@ export function makeWerewolf({ players, wallet, notify, onChange, emit, cfg }) {
       case 'witchSave': night.save = v; break;
       case 'poison': night.poison = v; break;
       case 'psychic': night.psy = v; break;
+      case 'skipDay': break; // chỉ ghi nhận đã bấm (doneMap)
       default: return false;
     }
     doneMap.set(actKey(r, p), v ?? null);
@@ -628,7 +661,7 @@ export function makeWerewolf({ players, wallet, notify, onChange, emit, cfg }) {
       if (phase === 'vote') {
         for (const r of alive()) {
           const t = votes.get(r.idx);
-          if (t != null) tally.set(t, (tally.get(t) ?? 0) + (r.role === 'thi_truong' ? 2 : 1));
+          if (t != null) tally.set(t, (tally.get(t) ?? 0) + (r.mayor ? 2 : 1));
         }
       }
       const wolfTally = new Map();
@@ -644,8 +677,8 @@ export function makeWerewolf({ players, wallet, notify, onChange, emit, cfg }) {
         color: r.color,
         alive: r.alive,
         left: r.left,
-        mayor: r.role === 'thi_truong',
-        role: phase === 'ended' || r.revealed ? r.role : r.role === 'thi_truong' ? 'thi_truong' : null, // chết cũng không lộ vai; hết ván mới lật
+        mayor: r.mayor, // Thị Trưởng công khai từ đầu và giữ nguyên (cả phiếu đôi) dù bị Sói Đầu Đàn biến thành Sói, để không ai đoán được
+        role: phase === 'ended' ? r.role : r.pub, // chết cũng không lộ vai; hết ván mới lật
         votedFor: phase === 'vote' && votes.has(r.idx) ? (votes.get(r.idx) == null ? -1 : votes.get(r.idx)) : undefined,
         isMe: r.id === id,
       }));

@@ -21,7 +21,7 @@ Chỉ gồm **thông báo trời tối, trời sáng** và **lời gọi các va
 
 ## Gọi các vai trong đêm
 
-Mỗi vai có một câu **thức dậy** và một câu **nhắm mắt**. Riêng Phù Thủy có thêm một câu hỏi về bình độc, vì Phù Thủy có hai việc (cứu và đầu độc). Thứ tự gọi (đề xuất, giống Ma Sói thật): Thần Tình Yêu, Kẻ Phản Bội, Ma Sói, Sói Đầu Đàn, Sói Trắng, Tiên Tri, Bảo Vệ, Phù Thủy, Nhà Ngoại Cảm.
+Mỗi vai có một câu **thức dậy** và một câu **nhắm mắt**. Riêng Phù Thủy có thêm một câu hỏi về bình độc, vì Phù Thủy có hai việc (cứu và đầu độc). Thứ tự gọi: Thần Tình Yêu, Kẻ Phản Bội, **Bảo Vệ**, Ma Sói, Sói Đầu Đàn, Sói Trắng, Tiên Tri, Phù Thủy, Nhà Ngoại Cảm. Bảo Vệ gọi trước bầy Sói để Sói Đầu Đàn biết người bị cắn có được che không.
 
 | # | Tên file | Lời đọc | Ghi chú |
 |---|---|---|---|

@@ -16,6 +16,8 @@ const ROLE_ICON = {
   dan_lang: '🧑‍🌾', tien_tri: '🔮', bao_ve: '🛡️', tho_san: '🏹', phu_thuy: '🧪', thi_truong: '🎩', hoang_tu: '🤴', ngoai_cam: '👻', tinh_yeu: '💘',
   ma_soi: '🐺', soi_con: '🐾', soi_dau_dan: '🌕', phan_boi: '🎭', chan_doi: '🤡', soi_trang: '🤍',
 };
+// màu chữ phe thắng trên mặt bàn (sáng hơn màu viền thẻ để dễ đọc)
+const WIN_COLOR = { dan: '#8dffa0', soi: '#ff8a80', chan_doi: '#d9b3ff', soi_trang: '#e6ebf5' };
 const FACTION_COLOR = { dan: '#3d9b6a', soi: '#c4413a', chan_doi: '#8e5bc4', soi_trang: '#b9c2d0' };
 
 // CSS riêng của game (nhúng một lần)
@@ -45,6 +47,7 @@ function ensureStyle() {
     .ww-name b { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .ww-pill { display:inline-block; background:rgba(0,0,0,.55); border-radius:8px; padding:0 5px; font-size:10px; margin-top:1px; }
     .ww-center-icon { font-size:34px; line-height:1; }
+    .ww-win { font-size:26px; font-weight:bold; line-height:1.2; color:var(--wc); text-shadow:0 2px 8px rgba(0,0,0,.7); margin:2px 0 4px; }
     .ww-timer { font-size:30px; font-weight:bold; color:#ffd36b; line-height:1.1; }
     .ww-center-text { font-size:12px; opacity:.85; }
     @keyframes wwpulse { 0%,100% { box-shadow:0 0 0 0 rgba(107,209,255,.7); } 50% { box-shadow:0 0 0 8px rgba(107,209,255,0); } }
@@ -171,9 +174,20 @@ export default {
       return n;
     }
 
+    // Tên phe thắng hiện to giữa bàn khi hết ván
+    function winTitle(w) {
+      return w === 'dan' ? 'PHE DÂN LÀNG' : w === 'soi' ? 'PHE MA SÓI' : w === 'chan_doi' ? 'CHÁN ĐỜI' : 'SÓI TRẮNG';
+    }
+
     function drawCenter() {
       const felt = el('div', 'ww-felt');
       felt.append(el('div', 'ww-center-icon', PHASE_ICON[s.phase]));
+      if (s.phase === 'ended' && s.result) {
+        const w = s.result.winner;
+        const big = el('div', 'ww-win', w ? `${winTitle(w)} THẮNG!` : 'VÁN BỊ HUỶ');
+        big.style.setProperty('--wc', w ? WIN_COLOR[w] : '#ffd36b');
+        felt.appendChild(big);
+      }
       timerEl = el('div', 'ww-timer');
       felt.appendChild(timerEl);
       const sub = s.phase === 'night' ? `Đêm ${s.nightNo}` : s.dayNo && ['day', 'vote', 'hunter'].includes(s.phase) ? `Ngày ${s.dayNo}` : PHASE_TITLE[s.phase];
@@ -272,6 +286,7 @@ export default {
     // ----- khung bên phải -----
     // Mô tả điều bạn đã chọn (mỗi khung chỉ chọn được một lần)
     function chosenText(prompt) {
+      if (prompt.kind === 'skip') return 'Bạn đã bỏ qua thảo luận.';
       const c = prompt.chosen;
       if (prompt.kind === 'yesno') return `Bạn đã chọn: ${c ? 'Có' : 'Không'}.`;
       if (c == null) return 'Bạn đã bỏ qua.';
@@ -295,6 +310,8 @@ export default {
         const done = el('div', '', `✔ ${chosenText(prompt)}`);
         done.style.cssText = 'color:#7be08a;font-weight:bold;margin-top:4px';
         parts.push(done, el('div', 'g-dim', 'Không đổi được nữa, chờ người khác.'));
+      } else if (prompt.kind === 'skip') {
+        row.append(btn('Bỏ qua thảo luận', () => send({ op: 'act', value: true })));
       } else if (prompt.kind === 'yesno') {
         row.append(btn('Có', () => send({ op: 'act', value: true })), btn('Không', () => send({ op: 'act', value: false })));
         parts.push(warning(prompt));

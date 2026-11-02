@@ -23,6 +23,32 @@ export const CLIP_MS = {
   // psychic_sleep: chưa thu, thiếu file thì bỏ qua (game vẫn chạy, chỉ không có tiếng)
 };
 
+// Lời của quản trò dưới dạng chữ (hiện làm ghi chú ở giữa bàn cùng lúc phát giọng; ai tắt giọng đọc vẫn đọc được). Khớp KICH_BAN_QUAN_TRO.md.
+export const CLIP_TEXT = {
+  night_start: 'Trời tối rồi, mọi người nhắm mắt lại.',
+  dawn: 'Trời sáng rồi, mọi người mở mắt.',
+  vote_start: 'Hết giờ thảo luận. Mời mọi người bỏ phiếu.',
+  cupid_wake: 'Thần Tình Yêu thức dậy. Hãy chọn hai người thành đôi.',
+  cupid_sleep: 'Thần Tình Yêu nhắm mắt lại.',
+  traitor_wake: 'Kẻ Phản Bội thức dậy. Hãy nhận ra bầy Sói.',
+  traitor_sleep: 'Kẻ Phản Bội nhắm mắt lại.',
+  guard_wake: 'Bảo Vệ thức dậy. Hãy chọn một người để bảo vệ.',
+  guard_sleep: 'Bảo Vệ nhắm mắt lại.',
+  wolf_wake: 'Ma Sói thức dậy. Hãy chọn một người để cắn.',
+  wolf_sleep: 'Ma Sói nhắm mắt lại.',
+  alpha_wake: 'Sói Đầu Đàn thức dậy. Bạn có muốn biến người bị cắn thành Sói không?',
+  alpha_sleep: 'Sói Đầu Đàn nhắm mắt lại.',
+  whitewolf_wake: 'Sói Trắng thức dậy. Bạn có muốn giết một Sói khác không?',
+  whitewolf_sleep: 'Sói Trắng nhắm mắt lại.',
+  seer_wake: 'Tiên Tri thức dậy. Hãy chọn một người để soi.',
+  seer_sleep: 'Tiên Tri nhắm mắt lại.',
+  witch_wake: 'Phù Thủy thức dậy. Đêm nay người này sẽ chết. Bạn có muốn cứu không?',
+  witch_poison: 'Phù Thủy, bạn có muốn dùng bình độc với ai không?',
+  witch_sleep: 'Phù Thủy nhắm mắt lại.',
+  psychic_wake: 'Nhà Ngoại Cảm thức dậy. Hãy chọn hai người để so sánh.',
+  psychic_sleep: 'Nhà Ngoại Cảm nhắm mắt lại.',
+};
+
 // Thứ tự gọi và việc của từng vai. windowMs = thời gian tối đa vai đó được thao tác sau lời gọi (chọn xong sớm thì sang vai kế tiếp).
 // Thứ tự có lý do:
 //  - Thần Tình Yêu và Kẻ Phản Bội chỉ đêm đầu: ghép đôi, nhận ra bầy Sói trước khi có ai bị cắn.

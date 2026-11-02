@@ -1,6 +1,6 @@
 import { el } from './util.js';
 import { ROLES, FACTION_NAMES } from './werewolf/roles.js';
-import { clipUrl } from './werewolf/narration.js';
+import { clipUrl, CLIP_TEXT } from './werewolf/narration.js';
 import { FRUITS } from '../scene/looks.js';
 
 // Ma Sói: cửa sổ 2D. Bàn tròn có ghế, mỗi người một hình đại diện (trái cây giống nhân vật trong rạp), vai của bạn là một thẻ bài lật được.
@@ -47,6 +47,7 @@ function ensureStyle() {
     .ww-name b { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .ww-pill { display:inline-block; background:rgba(0,0,0,.55); border-radius:8px; padding:0 5px; font-size:10px; margin-top:1px; }
     .ww-center-icon { font-size:34px; line-height:1; }
+    .ww-caption { font-size:12px; font-style:italic; color:#cfe3ff; margin-top:6px; line-height:1.25; max-width:100%; }
     .ww-win { font-size:26px; font-weight:bold; line-height:1.2; color:var(--wc); text-shadow:0 2px 8px rgba(0,0,0,.7); margin:2px 0 4px; }
     .ww-timer { font-size:30px; font-weight:bold; color:#ffd36b; line-height:1.1; }
     .ww-center-text { font-size:12px; opacity:.85; }
@@ -82,7 +83,9 @@ export default {
     const title = el('span');
     const micInfo = el('span');
     micInfo.style.cssText = 'font-size:12px;font-weight:normal;color:#ccc';
-    top.append(title, micInfo);
+    const voiceBtn = el('button', 'g-btn');
+    voiceBtn.style.cssText = 'font-size:12px;padding:3px 8px;font-weight:normal';
+    top.append(title, micInfo, voiceBtn);
     const main = el('div');
     main.style.cssText = 'display:flex;gap:10px;flex:1;min-height:0';
     const table = el('div', 'ww-table');
@@ -101,6 +104,34 @@ export default {
     let timerEl = null;
     let cardFace = true; // thẻ bài đang ngửa hay úp (bấm vào thẻ để úp lại, tránh người bên cạnh nhìn trộm)
     let dealtKey = '';
+    let caption = ''; // lời quản trò mới nhất (chữ), hiện giữa bàn cạnh ghi chú ban đêm / ban ngày
+    let captionEl = null;
+    // Giọng đọc của quản trò: mỗi người tự bật / tắt (nhớ trong trình duyệt); tắt thì chỉ đọc chữ ở giữa bàn
+    const VOICE_KEY = 'ww-voice';
+    let voiceOn = true;
+    try {
+      voiceOn = localStorage.getItem(VOICE_KEY) !== 'off';
+    } catch {
+      // không đọc được thì mặc định bật
+    }
+    const syncVoiceBtn = () => {
+      voiceBtn.textContent = voiceOn ? '🔊 Giọng đọc: bật' : '🔇 Giọng đọc: tắt';
+      voiceBtn.title = 'Bật hoặc tắt giọng đọc của quản trò (chữ vẫn hiện giữa bàn)';
+    };
+    voiceBtn.addEventListener('click', () => {
+      voiceOn = !voiceOn;
+      try {
+        localStorage.setItem(VOICE_KEY, voiceOn ? 'on' : 'off');
+      } catch {
+        // không lưu được thì thôi
+      }
+      if (!voiceOn) {
+        for (const a of audios) a.pause();
+        audios.clear();
+      }
+      syncVoiceBtn();
+    });
+    syncVoiceBtn();
 
     const btn = (text, onClick, cls = 'g-btn') => {
       const b = el('button', cls, text);
@@ -118,6 +149,10 @@ export default {
     const audios = new Set();
     function playCue(clip) {
       if (!clip) return;
+      // chữ luôn hiện (kể cả khi chưa có file giọng hoặc người chơi tắt giọng)
+      caption = CLIP_TEXT[clip] ?? caption;
+      if (captionEl) captionEl.textContent = caption;
+      if (!voiceOn) return;
       const a = new Audio(clipUrl(clip));
       audios.add(a);
       a.addEventListener('ended', () => audios.delete(a));
@@ -192,6 +227,8 @@ export default {
       felt.appendChild(timerEl);
       const sub = s.phase === 'night' ? `Đêm ${s.nightNo}` : s.dayNo && ['day', 'vote', 'hunter'].includes(s.phase) ? `Ngày ${s.dayNo}` : PHASE_TITLE[s.phase];
       felt.appendChild(el('div', 'ww-center-text', sub));
+      captionEl = el('div', 'ww-caption', caption);
+      felt.appendChild(captionEl);
       if (s.phase === 'lobby') felt.appendChild(el('div', 'ww-center-text', `${s.seats.filter(Boolean).length}/${s.max} người`));
       return felt;
     }
@@ -432,7 +469,9 @@ export default {
       const keepScroll = right.scrollTop;
       right.replaceChildren();
       timerEl = null;
+      captionEl = null;
       micInfo.textContent = '';
+      if (['lobby', 'countdown', 'ended'].includes(s.phase)) caption = ''; // hết ván / chưa chơi thì bỏ ghi chú cũ
       if (s.phase === 'lobby' || s.phase === 'countdown') {
         title.textContent = s.phase === 'countdown' ? 'Sắp bắt đầu...' : 'Bàn chờ Ma Sói';
         wrap.style.background = '#2a2f3d';

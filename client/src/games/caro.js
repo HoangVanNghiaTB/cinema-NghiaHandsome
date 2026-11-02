@@ -1,4 +1,4 @@
-import { el, watchSize } from './util.js';
+import { el, watchSize, createStakeBar } from './util.js';
 
 // Cờ Caro 13x13, 5 quân liền hàng thắng. Hai người ngồi hai phía, người khác xem. Luật chơi nằm ở server/games.js.
 export default {
@@ -18,12 +18,16 @@ export default {
       seatEls[s] = { label, btn };
       side.appendChild(row);
     }
+    const stakeBar = createStakeBar(ctx);
     const status = el('div', 'g-status');
-    const newBtn = el('button', 'g-btn', 'Ván mới');
+    const newBtn = el('button', 'g-btn', 'Chơi lại');
     newBtn.addEventListener('click', () => ctx.send({ op: 'new' }));
     const standBtn = el('button', 'g-btn', 'Rời bàn');
-    standBtn.addEventListener('click', () => ctx.send({ op: 'stand' }));
-    side.append(status, newBtn, standBtn, el('div', 'g-dim', '5 quân liền hàng (ngang, dọc, chéo) là thắng, trừ khi bị chặn cả 2 đầu.'));
+    standBtn.addEventListener('click', () => {
+      if (s?.pot > 0 && !confirm('Bỏ bàn giữa ván là thua, mất ' + s.stake + ' điểm cược. Chắc chưa?')) return;
+      ctx.send({ op: 'stand' });
+    });
+    side.append(stakeBar.node, status, newBtn, standBtn, el('div', 'g-dim', '5 quân liền hàng (ngang, dọc, chéo) là thắng, trừ khi bị chặn cả 2 đầu.'));
     wrap.append(canvas, side);
     root.appendChild(wrap);
 
@@ -97,15 +101,21 @@ export default {
         const seat = s.seats[k];
         seatEls[k].label.textContent = seat ? seat.name + (seat.id === ctx.me().id ? ' (bạn)' : '') : '(trống)';
         seatEls[k].btn.style.display = !seat && !me ? '' : 'none';
+        seatEls[k].btn.textContent = 'Ngồi (cược ' + s.stake + ')';
       }
+      stakeBar.update(s, !!me && !(s.seats.X && s.seats.O) && s.pot === 0);
       standBtn.style.display = me ? '' : 'none';
-      newBtn.style.display = me && s.winner ? '' : 'none';
+      const iAmReady = s.ready.includes(me);
+      newBtn.style.display = me && s.pot === 0 && s.seats.X && s.seats.O ? '' : 'none';
+      newBtn.textContent = iAmReady ? 'Đã sẵn sàng, chờ đối thủ...' : 'Chơi lại (cược ' + s.stake + ')';
+      newBtn.disabled = iAmReady;
       let text;
       if (s.winner === 'draw') text = 'Hoà!';
       else if (s.winner) text = `${s.seats[s.winner]?.name ?? s.winner} thắng! 🎉`;
       else if (!s.seats.X || !s.seats.O) text = me ? 'Chờ đối thủ...' : 'Chọn chỗ ngồi để chơi';
       else text = s.seats[s.turn].id === ctx.me().id ? 'Đến lượt bạn!' : `Lượt của ${s.seats[s.turn].name}`;
-      status.textContent = text;
+      const awayName = s.away?.map((k) => s.seats[k]?.name).filter(Boolean).join(', ');
+      status.textContent = awayName && !s.winner ? text + ' · ' + awayName + ' đang vắng (xử thua sau ít phút)' : text;
       draw();
     }
 

@@ -1,4 +1,5 @@
 import { mapDelta } from '../ui/viewport.js';
+import { DUEL_STAKES } from '../economy.js';
 
 // Đồ dùng chung của các game treo tường
 
@@ -67,4 +68,28 @@ export function renderTop(container, top, title = 'Kỷ lục') {
     row.append(el('span', '', `${i + 1}. ${t.name}`), el('b', '', String(t.score)));
     container.appendChild(row);
   });
+}
+
+// Khung cược của bàn hai người (Cờ Caro, Nối 4): hiện mức cược, và người ngồi một mình thì chọn được mức khác.
+// Gọi update(state, canChange) mỗi khi có trạng thái mới; trả về { node, update }.
+export function createStakeBar(ctx) {
+  const node = el('div', 'g-stakebar');
+  const info = el('div', 'g-dim');
+  const row = el('div', '');
+  row.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;margin:4px 0';
+  const buttons = DUEL_STAKES.map((n) => {
+    const b = el('button', 'g-btn', String(n));
+    b.addEventListener('click', () => ctx.send({ op: 'stake', amount: n }));
+    row.appendChild(b);
+    return [n, b];
+  });
+  node.append(info, row);
+  return {
+    node,
+    update(s, canChange) {
+      info.textContent = s.pot > 0 ? `Đang cược ${s.stake} điểm mỗi người · người thắng ăn ${s.pot}` : `Cược ${s.stake} điểm mỗi người · người thắng ăn ${s.stake * 2}`;
+      row.style.display = canChange ? 'flex' : 'none';
+      for (const [n, b] of buttons) b.style.outline = n === s.stake ? '2px solid #ffd36b' : '';
+    },
+  };
 }

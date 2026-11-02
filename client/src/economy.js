@@ -6,6 +6,9 @@ export const SING_COST = 50; // điểm để vào hát mỗi lần lên sân kh
 export const SING_PROMPT_MS = 15000; // không trả lời trong khoảng này thì tự xuống sân khấu
 export const TIP_AMOUNTS = [10, 50, 100]; // mức tặng điểm cho nhau
 
+export const DUEL_STAKES = [10, 20, 50, 100, 200]; // mức cược mỗi người ở game hai người (Cờ Caro, Nối 4)
+export const DUEL_STAKE_DEFAULT = 20;
+
 // Nhặt rác: cứ TRASH_EVERY_MS server thả một món rác ở chỗ ngẫu nhiên trong rạp (phòng có người), tối đa TRASH_MAX món cùng lúc
 // (đầy thì món cũ nhất biến mất). Ai đi tới gần nhặt trước thì được điểm, rác biến mất luôn, không lưu gì.
 // weight: tỉ lệ xuất hiện (càng hiếm điểm càng cao), color: màu hiện trong rạp.
@@ -24,7 +27,7 @@ export const TRASH_AREA = { minX: -9.2, maxX: 9.2, minZ: -9.5, maxZ: 6.2 };
 
 // Cách kiếm điểm (hiện ở tab "Kiếm điểm" trong ví, và là luật server dùng thật ở server/games.js)
 export const EARN_RULES = [
-  ['Cờ Caro, Nối 4', 'Thắng một ván (đã đi đủ nước) +40, hoà +10 mỗi người'],
+  ['Cờ Caro, Nối 4', 'Hai người cược bằng điểm (mức do người ngồi trước chọn): thắng ăn cả hai phần cược, hoà thì hoàn lại, bỏ giữa chừng là thua'],
   ['Đập chuột', 'Mỗi 2 điểm trong ván được 1 điểm thưởng (tối đa 30), hạng nhất +15'],
   ['Rắn săn mồi', 'Mỗi 2 điểm được 1 điểm thưởng (tối đa 25 mỗi lần, cách nhau 20 giây)'],
   ['2048', 'Mỗi 150 điểm được 1 điểm thưởng (tối đa 30 mỗi lần, cách nhau 20 giây)'],

@@ -5,27 +5,167 @@
 //   leave()  người chơi đóng game / thoát, trả về true nếu trạng thái đổi
 // createGames(io, players).attach(socket) gắn các sự kiện 'game-open' / 'game-close' / 'game-act' cho từng socket.
 
+import { DUEL_STAKES, DUEL_STAKE_DEFAULT } from '../client/src/economy.js';
+
 const LEADERBOARD_SIZE = 5;
 
-// Thưởng điểm khi hết ván cờ hai người: thắng +40, hoà +10 mỗi người; ván quá ngắn (đi chưa đủ nước) thì không thưởng
-function awardBoardGame(reward, board, seats, winner, minMoves, label) {
-  if (board.filter((c) => c !== '.').length < minMoves) return;
-  if (winner === 'draw') {
-    for (const seat of Object.values(seats)) reward(seat.id, 10, `${label}: hoà`);
-  } else {
-    reward(seats[winner].id, 40, `Thắng ${label}`);
+// ----- Bàn hai người có cược (Cờ Caro, Nối 4) -----
+// Người ngồi trước chọn mức cược (DUEL_STAKES); người ngồi sau ngồi xuống là đồng ý. Đủ hai người thì trừ cược của cả hai
+// (giữ trong "pot"), hết ván: thắng nhận cả pot, hoà hoàn lại mỗi người phần của mình. Bỏ bàn / mất kết nối giữa ván (đã đi ít nhất
+// một nước) là thua; chưa đi nước nào thì hoàn cược. Đóng cửa sổ game giữa ván thì được DUEL_AWAY_MS để quay lại rồi mới bị xử thua.
+// Chơi lại ("Ván mới") cần cả hai cùng bấm, vì mỗi ván lại trừ cược.
+const DUEL_AWAY_MS = 60000;
+
+function makeDuel(sides, { players, wallet, notify, onChange, label, reset, moves, setWinner }) {
+  const seats = Object.fromEntries(sides.map((s) => [s, null]));
+  const ready = new Set();
+  const awayTimers = new Map(); // bên -> hẹn giờ xử thua
+  let amount = DUEL_STAKE_DEFAULT;
+  let pot = 0;
+  const full = () => sides.every((s) => seats[s]);
+  const sideOf = (id) => sides.find((s) => seats[s]?.id === id) ?? null;
+  const other = (s) => sides.find((x) => x !== s);
+  const cidOf = (id) => players.get(id)?.cid;
+  const ptsOf = (id) => {
+    const cid = cidOf(id);
+    return cid ? wallet.pts(cid) : 0;
+  };
+  const give = (id, amt, reason) => {
+    const cid = cidOf(id);
+    if (cid && amt > 0) wallet.add(cid, amt, reason);
+  };
+  const clearAway = (s) => {
+    clearTimeout(awayTimers.get(s));
+    awayTimers.delete(s);
+  };
+
+  // Hai người đã ngồi: trừ cược của cả hai và bắt đầu ván mới. Ai không đủ điểm thì bị mời đứng dậy (ván không bắt đầu).
+  function begin() {
+    const poor = sides.filter((s) => ptsOf(seats[s].id) < amount);
+    if (poor.length) {
+      for (const s of poor) {
+        notify(seats[s].id, `Bạn không đủ ${amount} điểm để cược, đã rời bàn.`);
+        clearAway(s);
+        seats[s] = null;
+      }
+      ready.clear();
+      return false;
+    }
+    for (const s of sides) wallet.pay(cidOf(seats[s].id), amount, `Cược ${label}`);
+    pot = amount * sides.length;
+    ready.clear();
+    reset();
+    return true;
   }
+
+  // Kết thúc ván: result = bên thắng hoặc 'draw'
+  function settle(result) {
+    if (pot <= 0) return;
+    if (result === 'draw') for (const s of sides) give(seats[s]?.id, amount, `${label}: hoà, hoàn cược`);
+    else give(seats[result]?.id, pot, `Thắng cược ${label}`);
+    pot = 0;
+  }
+
+  function leave(id) {
+    const side = sideOf(id);
+    if (!side) return false;
+    const opp = seats[other(side)];
+    if (pot > 0 && opp) {
+      if (moves() === 0) {
+        settle('draw');
+        notify(opp.id, 'Đối thủ rời bàn khi chưa đi nước nào, cược được hoàn lại.');
+      } else {
+        const won = pot;
+        settle(other(side));
+        setWinner(other(side));
+        notify(opp.id, `${seats[side].name} bỏ cuộc, bạn ăn ${won} điểm.`);
+      }
+    }
+    clearAway(side);
+    seats[side] = null;
+    ready.clear();
+    if (sides.every((s) => !seats[s])) reset();
+    return true;
+  }
+
+  return {
+    seats,
+    sideOf,
+    settle,
+    leave,
+    info: () => ({ stake: amount, pot, ready: [...ready], away: [...awayTimers.keys()] }),
+    // Người chơi đóng cửa sổ game giữa ván: cho quay lại trong DUEL_AWAY_MS rồi mới xử thua. Trả về true nếu đã áp dụng.
+    away(id) {
+      const side = sideOf(id);
+      if (!side || pot <= 0 || moves() === 0) return false;
+      clearAway(side);
+      awayTimers.set(side, setTimeout(() => {
+        awayTimers.delete(side);
+        if (leave(id)) onChange();
+      }, DUEL_AWAY_MS));
+      return true;
+    },
+    back(id) {
+      const side = sideOf(id);
+      if (side && awayTimers.has(side)) {
+        clearAway(side);
+        return true;
+      }
+      return false;
+    },
+    // Xử lý thao tác ngồi / chọn cược / chơi lại / rời bàn; trả về undefined nếu không phải thao tác của bàn cược
+    act(p, d) {
+      if (d.op === 'sit') {
+        const side = sides.includes(d.side) ? d.side : null;
+        if (!side || seats[side] || sideOf(p.id)) return false;
+        if (ptsOf(p.id) < amount) {
+          notify(p.id, `Cần ít nhất ${amount} điểm để ngồi bàn cược này.`);
+          return false;
+        }
+        seats[side] = { id: p.id, name: p.name };
+        if (full() && pot === 0) begin();
+        return true;
+      }
+      if (d.op === 'stake') {
+        const n = Math.floor(d.amount);
+        // chỉ người ngồi một mình mới đổi được mức cược (người sau ngồi xuống là đồng ý mức đang hiện)
+        if (!DUEL_STAKES.includes(n) || !sideOf(p.id) || full() || pot > 0) return false;
+        if (ptsOf(p.id) < n) {
+          notify(p.id, `Bạn không đủ ${n} điểm để đặt mức cược này.`);
+          return false;
+        }
+        amount = n;
+        return true;
+      }
+      if (d.op === 'new') {
+        const side = sideOf(p.id);
+        if (!side || pot > 0 || !full()) return false;
+        ready.add(side);
+        if (ready.size === sides.length) begin();
+        return true;
+      }
+      if (d.op === 'stand') return leave(p.id);
+      return undefined;
+    },
+    dispose() {
+      for (const t of awayTimers.values()) clearTimeout(t);
+    },
+  };
 }
 
 // ----- Cờ Caro: 2 người ngồi hai phía (X, O), 5 quân liền hàng thắng; người khác xem -----
 const CARO_N = 13;
 const CARO_WIN = 5;
 
-function makeCaro({ reward }) {
-  const AWARD_MIN_MOVES = 9;
-  const AWARD_LABEL = 'Cờ Caro';
+function makeCaro({ players, wallet, notify, onChange }) {
   let board, turn, winner, line, last;
-  const seats = { X: null, O: null };
+  const duel = makeDuel(['X', 'O'], {
+    players, wallet, notify, onChange, label: 'Cờ Caro',
+    reset: () => reset(),
+    moves: () => board.filter((c) => c !== '.').length,
+    setWinner: (s) => { winner = s; },
+  });
+  const seats = duel.seats;
   const reset = () => {
     board = Array(CARO_N * CARO_N).fill('.');
     turn = 'X';
@@ -34,7 +174,7 @@ function makeCaro({ reward }) {
     last = -1;
   };
   reset();
-  const sideOf = (id) => (seats.X?.id === id ? 'X' : seats.O?.id === id ? 'O' : null);
+  const sideOf = duel.sideOf;
 
   // Các ô cùng quân liền nhau qua ô idx theo 4 hướng; đủ CARO_WIN thì trả về cả hàng.
   // Luật phổ biến ở Việt Nam: hàng bị quân đối thủ (hoặc mép bàn) chặn cả hai đầu thì không tính thắng.
@@ -67,19 +207,16 @@ function makeCaro({ reward }) {
   }
 
   return {
-    state: () => ({ n: CARO_N, board: board.join(''), seats, turn, winner, line, last }),
+    state: () => ({ n: CARO_N, board: board.join(''), seats, turn, winner, line, last, ...duel.info() }),
     brief() {
-      if (seats.X && seats.O) return winner ? (winner === 'draw' ? 'Hoà!' : `${seats[winner].name} thắng!`) : `${seats.X.name} vs ${seats.O.name}`;
-      if (seats.X || seats.O) return `${(seats.X ?? seats.O).name} đang chờ đối thủ`;
+      const bet = `cược ${duel.info().stake}`;
+      if (seats.X && seats.O) return winner ? (winner === 'draw' ? 'Hoà!' : `${seats[winner].name} thắng!`) : `${seats.X.name} vs ${seats.O.name} · ${bet}`;
+      if (seats.X || seats.O) return `${(seats.X ?? seats.O).name} chờ đối thủ · ${bet}`;
       return 'Bàn trống, vào chơi đi!';
     },
     act(p, d) {
-      if (d.op === 'sit') {
-        const side = d.side === 'X' || d.side === 'O' ? d.side : null;
-        if (!side || seats[side] || sideOf(p.id)) return false;
-        seats[side] = { id: p.id, name: p.name };
-        return true;
-      }
+      const handled = duel.act(p, d);
+      if (handled !== undefined) return handled;
       if (d.op === 'move') {
         const side = sideOf(p.id);
         const idx = d.idx;
@@ -91,30 +228,21 @@ function makeCaro({ reward }) {
         if (l) {
           winner = side;
           line = l;
-          awardBoardGame(reward, board, seats, winner, AWARD_MIN_MOVES, AWARD_LABEL);
+          duel.settle(winner);
         } else if (!board.includes('.')) {
           winner = 'draw';
-          awardBoardGame(reward, board, seats, winner, AWARD_MIN_MOVES, AWARD_LABEL);
+          duel.settle(winner);
         } else {
           turn = side === 'X' ? 'O' : 'X';
         }
         return true;
       }
-      if (d.op === 'new') {
-        if (!sideOf(p.id) || !winner) return false;
-        reset();
-        return true;
-      }
-      if (d.op === 'stand') return this.leave(p.id);
       return false;
     },
-    leave(id) {
-      const side = sideOf(id);
-      if (!side) return false;
-      seats[side] = null;
-      if (!seats.X && !seats.O) reset(); // bàn trống hẳn thì dọn bàn cờ
-      return true;
-    },
+    leave: duel.leave,
+    away: duel.away,
+    back: duel.back,
+    dispose: duel.dispose,
   };
 }
 
@@ -271,11 +399,15 @@ function makeSolo(maxScore, { reward, label, rewardOf }) {
 const C4_COLS = 7;
 const C4_ROWS = 6;
 
-function makeConnect4({ reward }) {
-  const AWARD_MIN_MOVES = 7;
-  const AWARD_LABEL = 'Nối 4';
+function makeConnect4({ players, wallet, notify, onChange }) {
   let board, turn, winner, line, last;
-  const seats = { R: null, Y: null };
+  const duel = makeDuel(['R', 'Y'], {
+    players, wallet, notify, onChange, label: 'Nối 4',
+    reset: () => reset(),
+    moves: () => board.filter((c) => c !== '.').length,
+    setWinner: (s) => { winner = s; },
+  });
+  const seats = duel.seats;
   const reset = () => {
     board = Array(C4_COLS * C4_ROWS).fill('.'); // chỉ số = hàng * 7 + cột, hàng 0 ở trên cùng
     turn = 'R';
@@ -284,7 +416,7 @@ function makeConnect4({ reward }) {
     last = -1;
   };
   reset();
-  const sideOf = (id) => (seats.R?.id === id ? 'R' : seats.Y?.id === id ? 'Y' : null);
+  const sideOf = duel.sideOf;
 
   function winLine(idx, c) {
     const x = idx % C4_COLS;
@@ -305,19 +437,16 @@ function makeConnect4({ reward }) {
   }
 
   return {
-    state: () => ({ cols: C4_COLS, rows: C4_ROWS, board: board.join(''), seats, turn, winner, line, last }),
+    state: () => ({ cols: C4_COLS, rows: C4_ROWS, board: board.join(''), seats, turn, winner, line, last, ...duel.info() }),
     brief() {
-      if (seats.R && seats.Y) return winner ? (winner === 'draw' ? 'Hoà!' : `${seats[winner].name} thắng!`) : `${seats.R.name} vs ${seats.Y.name}`;
-      if (seats.R || seats.Y) return `${(seats.R ?? seats.Y).name} đang chờ đối thủ`;
+      const bet = `cược ${duel.info().stake}`;
+      if (seats.R && seats.Y) return winner ? (winner === 'draw' ? 'Hoà!' : `${seats[winner].name} thắng!`) : `${seats.R.name} vs ${seats.Y.name} · ${bet}`;
+      if (seats.R || seats.Y) return `${(seats.R ?? seats.Y).name} chờ đối thủ · ${bet}`;
       return 'Bàn trống, vào chơi đi!';
     },
     act(p, d) {
-      if (d.op === 'sit') {
-        const side = d.side === 'R' || d.side === 'Y' ? d.side : null;
-        if (!side || seats[side] || sideOf(p.id)) return false;
-        seats[side] = { id: p.id, name: p.name };
-        return true;
-      }
+      const handled = duel.act(p, d);
+      if (handled !== undefined) return handled;
       if (d.op === 'drop') {
         const side = sideOf(p.id);
         const col = d.col;
@@ -333,30 +462,21 @@ function makeConnect4({ reward }) {
         if (l) {
           winner = side;
           line = l;
-          awardBoardGame(reward, board, seats, winner, AWARD_MIN_MOVES, AWARD_LABEL);
+          duel.settle(winner);
         } else if (!board.includes('.')) {
           winner = 'draw';
-          awardBoardGame(reward, board, seats, winner, AWARD_MIN_MOVES, AWARD_LABEL);
+          duel.settle(winner);
         } else {
           turn = side === 'R' ? 'Y' : 'R';
         }
         return true;
       }
-      if (d.op === 'new') {
-        if (!sideOf(p.id) || !winner) return false;
-        reset();
-        return true;
-      }
-      if (d.op === 'stand') return this.leave(p.id);
       return false;
     },
-    leave(id) {
-      const side = sideOf(id);
-      if (!side) return false;
-      seats[side] = null;
-      if (!seats.R && !seats.Y) reset();
-      return true;
-    },
+    leave: duel.leave,
+    away: duel.away,
+    back: duel.back,
+    dispose: duel.dispose,
   };
 }
 
@@ -535,6 +655,7 @@ export function createGames(io, players, wallet) {
     const p = players.get(id);
     if (p && amt > 0) wallet.add(p.cid, amt, reason);
   };
+  const notify = (id, text) => io.to(id).emit('notice', { text });
   const roomOf = (id) => `game:${id}`;
   const briefs = {};
   const games = {};
@@ -554,11 +675,11 @@ export function createGames(io, players, wallet) {
   // Dựng (hoặc dựng lại từ đầu) mọi game: bàn cờ, điểm, bảng kỷ lục đều về trống
   function init() {
     for (const g of Object.values(games)) g.dispose?.();
-    games.caro = makeCaro({ reward });
+    games.caro = makeCaro({ players, wallet, notify, onChange: () => push('caro') });
     games.whack = makeWhack({ onChange: () => push('whack'), roomSize: () => roomSize('whack'), reward });
     games.snake = makeSolo(2000, { reward, label: 'Rắn săn mồi', rewardOf: (v) => Math.min(25, Math.floor(v / 2)) });
     games.g2048 = makeSolo(1000000, { reward, label: '2048', rewardOf: (v) => Math.min(30, Math.floor(v / 150)) });
-    games.connect4 = makeConnect4({ reward });
+    games.connect4 = makeConnect4({ players, wallet, notify, onChange: () => push('connect4') });
     games.vote = makeVote(players, { reward });
     games.dice = makeDice({ onChange: () => push('dice'), players, wallet });
     for (const id of Object.keys(games)) briefs[id] = games[id].brief();
@@ -581,13 +702,15 @@ export function createGames(io, players, wallet) {
         const g = games[data.game];
         if (!g || !players.has(socket.id)) return;
         socket.join(roomOf(data.game));
+        if (g.back?.(socket.id)) push(data.game); // quay lại bàn cược giữa ván: huỷ hẹn xử thua
         socket.emit('game-state', { game: data.game, state: g.state() });
       });
       socket.on('game-close', (data = {}) => {
         const g = games[data.game];
         if (!g || !socket.rooms.has(roomOf(data.game))) return;
         socket.leave(roomOf(data.game));
-        if (g.leave(socket.id)) push(data.game);
+        // bàn cược đang giữa ván thì cho một lúc để quay lại, không bỏ chỗ ngay (xem makeDuel)
+        if (g.away?.(socket.id) || g.leave(socket.id)) push(data.game);
       });
       socket.on('game-act', (data = {}) => {
         const g = games[data.game];

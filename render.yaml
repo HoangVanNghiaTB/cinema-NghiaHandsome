@@ -9,6 +9,9 @@ services:
       - key: NODE_ENV
         value: production
       # Voice qua mạng khó nối (4G, mạng công ty) cần TURN. Điền 3 biến này trên Render dashboard:
+      # Mật khẩu phòng "ae siêu nhân" (repo công khai nên không ghi vào code). Điền giá trị trên Render dashboard (Environment).
+      - key: ROOM_PASSWORD_AE
+        sync: false
       - key: TURN_URL
         sync: false
       - key: TURN_USERNAME

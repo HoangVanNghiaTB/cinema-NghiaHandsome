@@ -549,7 +549,7 @@ export function createGames(io, players, wallet) {
       io.emit('game-brief', { game: id, text });
     }
   }
-  const roomSize = (id) => io.sockets.adapter.rooms.get(roomOf(id))?.size ?? 0;
+  const roomSize = (id) => io.adapter.rooms.get(roomOf(id))?.size ?? 0;
 
   // Dựng (hoặc dựng lại từ đầu) mọi game: bàn cờ, điểm, bảng kỷ lục đều về trống
   function init() {

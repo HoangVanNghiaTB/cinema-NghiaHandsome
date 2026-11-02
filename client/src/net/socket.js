@@ -9,7 +9,7 @@ const SERVER_URL = import.meta.env.DEV ? `http://${location.hostname}:3000` : un
 //             onStun({ id, by, duration }), onStage({ id, stage }), onStageDenied(),
 //             onEmote({ id, type, on? }), onSwing({ id }), onMix(params), onLook({ id, look }),
 //             onGameState({ game, state }), onGameBrief({ game, text }), onWallet({ pts, owned, delta, reason }), onNotice({ text }) };
-//             onInit còn nhận thêm briefs của các game và self = { look, wallet } (nhân vật đã lọc phụ kiện chưa mua, điểm hiện có)
+//             onDenied(reason) khi phòng từ chối (sai mật khẩu...); onInit còn nhận thêm briefs của các game và self = { look, wallet } (nhân vật đã lọc phụ kiện chưa mua, điểm hiện có)
 // Mã nhận dạng trình duyệt này (để tải lại trang vẫn giữ điểm và phụ kiện đã mua trong phòng)
 const CLIENT_ID_KEY = 'cinema-client-id';
 function getClientId() {
@@ -25,9 +25,17 @@ function getClientId() {
   }
 }
 
-export function connectToRoom({ name, color, look }, handlers) {
+// room: id phòng (xem rooms.js), mỗi phòng là một namespace socket.io riêng; password: chỉ phòng khoá mới cần.
+// Server từ chối thì gọi handlers.onDenied('bad-password' | 'no-password-configured' | 'too-many').
+export function connectToRoom({ name, color, look, room, password }, handlers) {
   const clientId = getClientId();
-  const socket = io(SERVER_URL);
+  const socket = io(`${SERVER_URL ?? ''}/${room}`, { auth: { password: password ?? '' } });
+  socket.on('connect_error', (err) => {
+    if (['bad-password', 'no-password-configured', 'too-many'].includes(err.message)) {
+      socket.disconnect(); // bị từ chối thì không tự thử lại
+      handlers.onDenied?.(err.message);
+    }
+  });
 
   socket.on('connect', () => {
     handlers.onStatus?.(true);

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 // Phụ kiện dựng bằng hình khối đơn giản (ít đa giác) cho nhân vật trái cây (xem fruitRig.js).
 // Toạ độ mét trong khung của avatar: mặt nhìn về -z, lưng là +z, y lên. Thân là hình trứng tâm (0, 0.53, 0),
@@ -116,16 +117,43 @@ function buildBack(type) {
   return g;
 }
 
+// Gộp mọi mảnh của một món thành MỘT mesh: vị trí/xoay/tỉ lệ từng mảnh được áp sẵn vào hình, màu từng mảnh lưu thành màu đỉnh
+// (vật liệu Lambert nhân màu đỉnh nên ra đúng màu cũ). Hình y hệt nhưng chỉ tốn một lệnh vẽ thay vì 3 đến 8.
+const accessoryMat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+const mergedGeos = new Map();
+function mergeAccessory(root) {
+  root.updateMatrixWorld(true);
+  const parts = [];
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    const part = o.geometry.clone();
+    part.applyMatrix4(o.matrixWorld);
+    const { r, g, b } = o.material.color;
+    const colors = new Float32Array(part.attributes.position.count * 3);
+    for (let i = 0; i < colors.length; i += 3) colors.set([r, g, b], i);
+    part.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    parts.push(part);
+  });
+  const merged = mergeGeometries(parts);
+  parts.forEach((p) => p.dispose());
+  return merged;
+}
+function mergedAccessory(key, build) {
+  if (!mergedGeos.has(key)) mergedGeos.set(key, mergeAccessory(build()));
+  return new THREE.Mesh(mergedGeos.get(key), accessoryMat);
+}
+
 // Dựng bộ phụ kiện theo `look` (xem looks.js). Trả về bốn nhóm riêng (mũ, tai nghe/tai mèo, kính, đồ sau lưng) để
 // fruitRig.js đặt từng nhóm theo kiểu thân (co/dịch cho vừa thân gầy); các nhóm có thể rỗng.
 export function buildAccessories(look, bodyColor) {
   const hat = new THREE.Group();
-  if (look.hat !== 'none') hat.add(buildHat(look.hat));
+  if (look.hat !== 'none') hat.add(mergedAccessory(`hat:${look.hat}`, () => buildHat(look.hat)));
   const ears = new THREE.Group();
-  if (look.ears !== 'none') ears.add(buildEars(look.ears, bodyColor));
+  // tai mèo lấy màu thân nên khoá có cả màu
+  if (look.ears !== 'none') ears.add(mergedAccessory(`ears:${look.ears}:${look.ears === 'cat' ? bodyColor : ''}`, () => buildEars(look.ears, bodyColor)));
   const glasses = new THREE.Group();
-  if (look.glasses !== 'none') glasses.add(buildGlasses(look.glasses));
+  if (look.glasses !== 'none') glasses.add(mergedAccessory(`glasses:${look.glasses}`, () => buildGlasses(look.glasses)));
   const back = new THREE.Group();
-  if (look.back !== 'none') back.add(buildBack(look.back));
+  if (look.back !== 'none') back.add(mergedAccessory(`back:${look.back}`, () => buildBack(look.back)));
   return { hat, ears, glasses, back };
 }

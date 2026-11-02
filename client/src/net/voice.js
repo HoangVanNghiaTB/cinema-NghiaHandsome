@@ -3,6 +3,9 @@
 // Quy trình: ai bật voice thì gửi 'hello' cho mọi người trong phòng. Khi hai bên đều đã bật,
 // bên có id nhỏ hơn tạo offer (tránh hai bên cùng offer một lúc).
 //
+// Chỉ nối với người ở gần (xem shouldConnect / shouldKeep / forceLink): ngoài vùng nghe thì giọng đã im nên không tốn
+// một đường truyền nào. Ra xa thì ngắt (báo 'bye' cho bên kia), lại gần thì nối lại. Phòng đông cũng chỉ giữ vài đường.
+//
 // Âm lượng gần/xa được áp dụng ở NGƯỜI NÓI: mỗi người nghe nhận một bản giọng có âm lượng riêng ("gain" theo khoảng
 // cách tới người đó), nên người nghe dùng thiết bị nào (kể cả iPhone, không cho chỉnh âm lượng) cũng nghe đúng.
 // Nếu thiết bị người nói không dùng được cách đó, tự chuyển về cách cũ ("raw"): gửi giọng gốc cho mọi người và để
@@ -22,7 +25,10 @@ const MIN_DETECT_GAIN = 0.04; // người nói gửi quá nhỏ (xa) thì không
 //     (senderMode 'gain': họ đã hạ âm lượng rồi nên chỉ còn phần mình chỉnh; 'raw': mình phải tự hạ gần/xa)
 // getSendVolume(id) -> 0..1: âm lượng giọng MÌNH gửi cho người đó (gần/xa, hoặc đang hát)
 // getExpectedGain(id) -> 0..1: âm lượng người đó đang gửi cho mình theo cùng quy tắc (để đo "đang nói" cho đúng)
-export function createVoice({ sendSignal, onSpeaking, onSelfSpeaking, getVolume, getSendVolume, getExpectedGain }) {
+// shouldConnect(id): có nên NỐI với người đó bây giờ không (trong vùng gần); shouldKeep(id): có nên GIỮ không (vùng đệm rộng hơn
+// để không nối/ngắt liên tục ở ranh giới); forceLink(id): luôn nối bất kể xa gần (người đang hát cả phòng đều nghe).
+// Không truyền thì nối với tất cả như trước.
+export function createVoice({ sendSignal, onSpeaking, onSelfSpeaking, getVolume, getSendVolume, getExpectedGain, shouldConnect, shouldKeep, forceLink }) {
   let selfId = null;
   let started = false;
   let starting = null;
@@ -40,6 +46,11 @@ export function createVoice({ sendSignal, onSpeaking, onSelfSpeaking, getVolume,
   const remoteModes = new Map(); // id -> 'gain' | 'raw': cách người đó đang gửi giọng cho mình
   const peers = new Map(); // id -> { pc, audio, sendGain, sendDest, analyser, speaking, lastLoud, ... }
   const chains = new Map(); // id -> Promise: xử lý tín hiệu tuần tự theo từng người
+  const retryAfter = new Map(); // id -> thời điểm (ms) sớm nhất được nối lại (sau khi ngắt vì xa hoặc kết nối hỏng)
+  const RELINK_DELAY_MS = 3000;
+  const FAIL_RETRY_MS = 5000;
+  const EVALUATE_MS = 500; // bao lâu xét lại ai cần nối / ngắt
+  let lastEvaluate = 0;
 
   function sendHello(id) {
     if (helloSentTo.has(id)) return;
@@ -51,9 +62,31 @@ export function createVoice({ sendSignal, onSpeaking, onSelfSpeaking, getVolume,
     roster.forEach((id) => sendSignal(id, { type: 'send-mode', mode: sendMode }));
   }
 
+  // Có nên nối với người này lúc này không: người đang hát thì luôn nối; còn lại phải ở trong vùng gần và hết thời gian chờ nối lại
+  function wantsLink(id) {
+    if (forceLink?.(id)) return true;
+    if (performance.now() < (retryAfter.get(id) ?? 0)) return false;
+    return shouldConnect ? !!shouldConnect(id) : true;
+  }
+
   function connectIfReady(id) {
     if (!started || !roster.has(id) || !readyPeers.has(id) || peers.has(id)) return;
-    if (selfId < id) createPeer(id, true);
+    if (selfId < id && wantsLink(id)) createPeer(id, true);
+  }
+
+  // Ngắt đường truyền với người đã đi xa (báo cho bên kia ngắt theo), rồi nối với người mới lại gần
+  function evaluateLinks() {
+    if (!started) return;
+    if (shouldKeep) {
+      for (const id of [...peers.keys()]) {
+        if (forceLink?.(id) || shouldKeep(id)) continue;
+        sendSignal(id, { type: 'bye' });
+        retryAfter.set(id, performance.now() + RELINK_DELAY_MS);
+        closePeer(id);
+        chains.delete(id);
+      }
+    }
+    roster.forEach(connectIfReady);
   }
 
   // Thử xem Web Audio có tạo ra âm thanh thật không: phát một âm thử qua MediaStreamDestination rồi đo lại.
@@ -158,7 +191,10 @@ export function createVoice({ sendSignal, onSpeaking, onSelfSpeaking, getVolume,
     pc.ontrack = (e) => attachRemote(id, peer, e.streams[0]);
     pc.onconnectionstatechange = () => {
       console.info(`Voice: kết nối với ${id} -> ${pc.connectionState}`); // để chẩn đoán khi mất tiếng
-      if (pc.connectionState === 'failed' && peers.get(id) === peer) closePeer(id);
+      if (pc.connectionState === 'failed' && peers.get(id) === peer) {
+        retryAfter.set(id, performance.now() + FAIL_RETRY_MS); // hỏng thì chờ một lúc mới thử nối lại, khỏi dồn dập
+        closePeer(id);
+      }
     };
 
     if (initiator) {
@@ -290,6 +326,7 @@ export function createVoice({ sendSignal, onSpeaking, onSelfSpeaking, getVolume,
     helloSentTo.clear();
     remoteModes.clear();
     chains.clear();
+    retryAfter.clear();
   }
 
   // Mỗi 0.1 giây: cập nhật âm lượng gần/xa (gửi và nghe), và phát hiện ai đang nói bằng mức tín hiệu (RMS)
@@ -299,6 +336,10 @@ export function createVoice({ sendSignal, onSpeaking, onSelfSpeaking, getVolume,
   let localSpeaking = false;
   setInterval(() => {
     const now = performance.now();
+    if (now - lastEvaluate >= EVALUATE_MS) {
+      lastEvaluate = now;
+      evaluateLinks();
+    }
     if (localAnalyser) {
       // mic đang tắt thì track bị vô hiệu hoá, tín hiệu là im lặng nên không cần kiểm tra riêng
       localAnalyser.getByteTimeDomainData(buf);
@@ -357,6 +398,7 @@ export function createVoice({ sendSignal, onSpeaking, onSelfSpeaking, getVolume,
       helloSentTo.delete(id);
       remoteModes.delete(id);
       chains.delete(id);
+      retryAfter.delete(id);
       closePeer(id);
     },
     reset,
@@ -400,11 +442,11 @@ export function createVoice({ sendSignal, onSpeaking, onSelfSpeaking, getVolume,
       return starting;
     },
 
-    // Số người đã nối voice thành công / số người khác trong phòng (để hiện lên màn hình khi chẩn đoán)
+    // Số đường voice đã nối thành công / số đường đang giữ (chỉ người ở gần và người đang hát; để hiện lên màn hình khi chẩn đoán)
     status() {
       let connected = 0;
       for (const peer of peers.values()) if (peer.pc.connectionState === 'connected') connected++;
-      return { connected, total: roster.size };
+      return { connected, total: peers.size };
     },
 
     // Thông số bảng chỉnh âm (mixParams.js): áp dụng ngay nếu đang hát, và dùng cho lần hát sau
@@ -483,6 +525,13 @@ export function createVoice({ sendSignal, onSpeaking, onSelfSpeaking, getVolume,
       }
       if (data.type === 'send-mode') {
         remoteModes.set(from, data.mode === 'gain' ? 'gain' : 'raw');
+        return;
+      }
+      if (data.type === 'bye') {
+        // bên kia thấy đã xa nhau: ngắt, và chờ một lúc mới nối lại (trừ khi họ lên hát)
+        retryAfter.set(from, performance.now() + RELINK_DELAY_MS);
+        closePeer(from);
+        chains.delete(from);
         return;
       }
       if (!started) return;

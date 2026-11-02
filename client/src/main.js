@@ -17,6 +17,7 @@ import { Avatars } from './scene/avatars.js';
 import { LOOK_OPTIONS, LOOK_LABELS, SHIRT_COLORS, ITEM_PRICES, itemKey, cleanLook } from './scene/looks.js';
 import { START_POINTS, SING_COST } from './economy.js';
 import { connectToRoom } from './net/socket.js';
+import { ROOMS, MAX_PLAYERS, DEFAULT_ROOM, roomById } from './rooms.js';
 import { createVoice } from './net/voice.js';
 
 const scene = new THREE.Scene(); // không đặt background để lớp CSS3D phía sau lộ ra qua "lỗ" màn hình
@@ -336,6 +337,10 @@ const voice = createVoice({
   getVolume: (id, senderMode) => listenVoiceVolume(id, senderMode),
   getSendVolume: (id) => sendVoiceVolume(id), // người nói tự hạ âm lượng gần/xa cho từng người nghe
   getExpectedGain: (id) => expectedVoiceGain(id),
+  // chỉ nối voice với người ở gần và người đang hát (xem VOICE_LINK_DIST)
+  shouldConnect: (id) => distanceTo(id) < VOICE_LINK_DIST,
+  shouldKeep: (id) => distanceTo(id) < VOICE_UNLINK_DIST,
+  forceLink: (id) => myStagePaid || isSinger(id),
 });
 function toggleMic() {
   if (voiceMode !== 'mic') return;
@@ -500,7 +505,65 @@ function setNetStatus(online) {
   net.lastElementChild.textContent = online ? 'onl' : 'off';
 }
 
+// Dọn trạng thái của phòng đang ở (người khác, ghế, sân khấu, voice...): khi mất kết nối hoặc rời phòng
+function resetRoomState() {
+  for (const id of [...avatars.items.keys()]) avatars.remove(id);
+  myId = null;
+  names.clear();
+  seatOwners.clear();
+  stageOwners.clear();
+  paidSingers.clear();
+  syncStageLights();
+  mySeat = null;
+  myStage = null;
+  myStagePaid = false;
+  showSingPrompt(false);
+  stopKaraoke();
+  voice.stopSinging();
+  stunUntil = 0;
+  stunRing.hide();
+  controls.pointerSpeed = 1;
+  voice.reset();
+}
+
+// Rời phòng hiện tại, về màn hình chọn phòng để vào phòng khác: ngắt kết nối và dọn sạch những gì của phòng cũ
+function leaveRoom() {
+  if (!room) return;
+  closeGame();
+  if (mixerOpen) closeMixer();
+  const old = room;
+  room = null; // đặt trước để sự kiện ngắt kết nối không báo "mất kết nối"
+  old.close();
+  resetRoomState();
+  for (const t of stunTimers.values()) clearTimeout(t);
+  stunTimers.clear();
+  setMic(false); // đang hát thì mic đã tự bật, rời phòng thì tắt
+  // ngừng video của phòng cũ (phòng mới nạp video của nó khi vào)
+  desired = null;
+  for (const f of followers) {
+    try {
+      f.player.pause();
+    } catch {
+      // trình phát chưa sẵn sàng thì thôi
+    }
+    f.loadedVideoId = null;
+  }
+  updatePlayPauseButton();
+  setMix(MIX_DEFAULTS);
+  setWallet({ pts: START_POINTS, owned: [] }); // điểm thật của phòng mới sẽ về khi vào
+  chatLog.replaceChildren();
+  $('toasts').replaceChildren();
+  $('room-name').textContent = '';
+  camera.position.set(0, EYE_HEIGHT, -4); // chỗ xuất phát
+  camera.rotation.set(0, 0, 0);
+  msg.textContent = '';
+  showLogin();
+}
+
 function joinRoom(profile) {
+  const roomCfg = roomById(profile.room);
+  cinema.setPhotoVisible(roomCfg.photo); // chỉ phòng riêng mới có ảnh treo tường
+  $('room-name').textContent = `Phòng: ${roomCfg.name}`;
   fpEat.setEating(false);
   selfAvatar.remove(SELF);
   selfAvatar.add({ id: SELF, name: profile.name, color: profile.color, look: myLook });
@@ -661,28 +724,17 @@ function joinRoom(profile) {
     onFull: () => {
       room.close();
       room = null;
-      showLogin('Phòng đã đủ 10 người, thử lại sau nhé.');
+      showLogin(`Phòng đã đủ ${MAX_PLAYERS} người, thử lại sau nhé.`);
+    },
+    onDenied: (reason) => {
+      room?.close();
+      room = null;
+      showLogin(DENIED_MESSAGES[reason] ?? 'Không vào được phòng này.');
     },
     onStatus: (connected) => {
       if (!room) return; // đã rời phòng (ví dụ phòng đầy)
       if (!connected) {
-        for (const id of [...avatars.items.keys()]) avatars.remove(id);
-        myId = null;
-        names.clear();
-        seatOwners.clear();
-        stageOwners.clear();
-        paidSingers.clear();
-        syncStageLights();
-        mySeat = null;
-        myStage = null;
-        myStagePaid = false;
-        showSingPrompt(false);
-        stopKaraoke();
-        voice.stopSinging();
-        stunUntil = 0;
-        stunRing.hide();
-        controls.pointerSpeed = 1;
-        voice.reset();
+        resetRoomState();
         setNetStatus(false);
         msg.textContent = 'Mất kết nối tới server, đang thử lại...';
       } else {
@@ -705,12 +757,60 @@ function loadProfile() {
   }
 }
 
+const DENIED_MESSAGES = {
+  'bad-password': 'Sai mật khẩu phòng.',
+  'no-password-configured': 'Phòng này chưa được cài mật khẩu trên server.',
+  'too-many': 'Nhập sai quá nhiều lần, thử lại sau ít phút.',
+};
+
 function showLogin(message = '') {
   $('login-msg').textContent = message;
   login.style.display = 'flex';
   menu.style.display = 'none';
   setNetStatus(false);
+  refreshRoomCounts();
 }
+
+// Chọn phòng: nhớ phòng và mật khẩu lần trước (mật khẩu chỉ lưu trên máy này); số người lấy từ server
+const ROOM_KEY = 'cinema-room';
+const ROOM_PASS_KEY = 'cinema-room-pass';
+const roomSelect = $('room-select');
+const roomPass = $('room-pass');
+const roomInfo = new Map(); // id -> { players, max, ready } từ /api/rooms
+function roomLabel(cfg) {
+  const info = roomInfo.get(cfg.id);
+  const count = info ? ` (${info.players}/${info.max})` : '';
+  return `${cfg.locked ? '\u{1F512} ' : ''}${cfg.name}${count}${info && !info.ready ? ' - chưa cài mật khẩu' : ''}`;
+}
+function renderRoomOptions() {
+  const keep = roomSelect.value;
+  roomSelect.replaceChildren();
+  for (const cfg of ROOMS) roomSelect.add(new Option(roomLabel(cfg), cfg.id));
+  roomSelect.value = keep || DEFAULT_ROOM;
+}
+function syncRoomPass() {
+  roomPass.style.display = roomById(roomSelect.value).locked ? '' : 'none';
+}
+async function refreshRoomCounts() {
+  try {
+    const res = await fetch(`${import.meta.env.DEV ? `http://${location.hostname}:3000` : ''}/api/rooms`);
+    for (const r of await res.json()) roomInfo.set(r.id, r);
+    renderRoomOptions();
+  } catch {
+    // không lấy được số người thì thôi, vẫn chọn phòng bình thường
+  }
+}
+renderRoomOptions(); // dựng danh sách trước rồi mới chọn phòng đã nhớ
+try {
+  roomSelect.value = localStorage.getItem(ROOM_KEY) || DEFAULT_ROOM;
+  roomPass.value = localStorage.getItem(ROOM_PASS_KEY) || '';
+} catch {
+  // không đọc được thì dùng mặc định
+}
+renderRoomOptions();
+syncRoomPass();
+roomSelect.addEventListener('change', syncRoomPass);
+refreshRoomCounts();
 
 const savedProfile = loadProfile();
 $('name').value = savedProfile.name ?? '';
@@ -719,14 +819,23 @@ $('color').value = savedProfile.color ?? '#' + new THREE.Color().setHSL(Math.ran
 login.addEventListener('submit', (e) => {
   e.preventDefault();
   const profile = { name: $('name').value.trim() || 'Khách', color: $('color').value };
+  const roomCfg = roomById(roomSelect.value);
+  $('login-msg').textContent = '';
+  if (roomCfg.locked && !roomPass.value) {
+    $('login-msg').textContent = 'Nhập mật khẩu phòng.';
+    roomPass.focus();
+    return;
+  }
   try {
     localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+    localStorage.setItem(ROOM_KEY, roomCfg.id);
+    localStorage.setItem(ROOM_PASS_KEY, roomCfg.locked ? roomPass.value : '');
   } catch {
     // không lưu được thì thôi
   }
   login.style.display = 'none';
   menu.style.display = 'flex';
-  joinRoom(profile);
+  joinRoom({ ...profile, room: roomCfg.id, password: roomCfg.locked ? roomPass.value : '' });
 });
 
 // Ngồi ghế: đứng gần ghế trống thì ngồi được (phím E, hoặc nút "Ngồi" trên điện thoại).
@@ -867,6 +976,11 @@ function stopKaraoke() {
 const VOICE_MAX = 0.6; // 3/5 âm lượng ban đầu
 const VOICE_NEAR = 1.5; // trong khoảng này nghe ở mức tối đa (khoảng 1 ghế, ghế cách nhau 1 m)
 const VOICE_FAR = 7; // từ khoảng này trở ra là im (phòng dài 18 m nên đầu phòng không nghe được cuối phòng)
+// Đường truyền voice chỉ giữ với người ở gần (ngoài vùng nghe giọng đã im, nối làm gì cho tốn): nối khi vào trong
+// VOICE_LINK_DIST, ngắt khi ra ngoài VOICE_UNLINK_DIST (rộng hơn để không nối/ngắt liên tục ở ranh giới).
+// Người đang hát (đã trả điểm) thì cả phòng nghe nên luôn nối với họ, và khi mình đang hát thì nối với tất cả.
+const VOICE_LINK_DIST = VOICE_FAR + 2;
+const VOICE_UNLINK_DIST = VOICE_FAR + 4;
 // Âm lượng mic sân khấu (mặc định 3/4 mức tối đa), nghe đều cả phòng; chỉnh ở bảng âm thanh (thanh "Âm lượng mic hát")
 const stageMicVolume = () => mixState.level / 100;
 
@@ -1001,6 +1115,7 @@ function closeMixer() {
   else controls.lock();
 }
 $('mixer-close').addEventListener('click', closeMixer);
+$('mixer-close-top').addEventListener('click', closeMixer);
 addEventListener('keydown', (e) => {
   if (mixerOpen && (e.code === 'Escape' || e.code === 'KeyE')) closeMixer();
 });
@@ -1059,6 +1174,7 @@ function closeGame() {
   gameHost.close();
 }
 $('game-close').addEventListener('click', closeGame);
+$('leave').addEventListener('click', leaveRoom);
 // Ví điểm (tặng điểm, cửa hàng): phím P, hoặc nút 💰 cạnh nút ẩn/hiện phím ảo trên điện thoại
 function openWallet() {
   if (!room || !myId || isStunned()) return;

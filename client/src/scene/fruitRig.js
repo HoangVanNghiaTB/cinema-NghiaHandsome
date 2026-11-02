@@ -97,6 +97,50 @@ function makeMouthGeos(fs) {
   return geos;
 }
 
+// Gộp các mảnh CÙNG chất liệu của một nhóm thành một mesh mỗi chất liệu (vị trí/xoay/tỉ lệ từng mảnh được áp sẵn vào hình,
+// chất liệu giữ nguyên nên hình y hệt, chỉ ít lệnh vẽ hơn). Hình gộp lưu lại dùng chung cho mọi nhân vật cùng khoá.
+const mergedCache = new Map();
+function mergedParts(key, build) {
+  let parts = mergedCache.get(key);
+  if (!parts) {
+    const root = build();
+    root.updateMatrixWorld(true);
+    const byMaterial = new Map();
+    root.traverse((o) => {
+      if (!o.isMesh) return;
+      const part = o.geometry.clone();
+      part.applyMatrix4(o.matrixWorld);
+      if (!byMaterial.has(o.material)) byMaterial.set(o.material, []);
+      byMaterial.get(o.material).push(part);
+    });
+    parts = [...byMaterial].map(([material, list]) => {
+      const geometry = list.length > 1 ? mergeGeometries(list) : list[0];
+      if (list.length > 1) list.forEach((p) => p.dispose());
+      return [material, geometry];
+    });
+    mergedCache.set(key, parts);
+  }
+  const group = new THREE.Group();
+  for (const [material, geometry] of parts) group.add(new THREE.Mesh(geometry, material));
+  return group;
+}
+
+// Một hình (geometry gốc) đặt sẵn vào vị trí / xoay z / tỉ lệ như một Mesh con, để gộp với các hình khác
+const partMatrix = new THREE.Matrix4();
+const partQuat = new THREE.Quaternion();
+const partEuler = new THREE.Euler();
+function placedGeometry(base, scale, position, rotZ = 0) {
+  const geometry = base.clone();
+  partQuat.setFromEuler(partEuler.set(0, 0, rotZ));
+  geometry.applyMatrix4(partMatrix.compose(new THREE.Vector3(...position), partQuat, new THREE.Vector3(...scale)));
+  return geometry;
+}
+const mergeList = (list) => {
+  const merged = list.length > 1 ? mergeGeometries(list) : list[0];
+  if (list.length > 1) list.forEach((p) => p.dispose());
+  return merged;
+};
+
 // Hạt dâu: gộp thành một hình duy nhất rải trên thân (trừ vùng mặt)
 let seedGeo = null;
 function getSeedGeo(body) {
@@ -193,66 +237,82 @@ function buildBow() {
   return grp;
 }
 
-// Mặt: cửa sổ da, mắt, lông mày, má, miệng. Trả về { group, eyes, mouthMeshes }
-function buildFace(cfg, female) {
-  const { plate, fs, eyeX, eyeY, browY, cheekX, cheekY, mouthY } = cfg;
+// Mặt: cửa sổ da, mắt, lông mày, má, miệng. Các mảnh tĩnh cùng chất liệu được gộp (xem placedGeometry) cho ít lệnh vẽ:
+// tròng trắng gộp một mesh (chớp mắt co y quanh tâm hàng mắt, hai mắt cùng y nên chung một mesh vẫn chớp y như từng mắt riêng),
+// đồng tử một mesh, lấp lánh một mesh, lông mày + mi một mesh, má một mesh. Hình gộp lưu theo kiểu nhân vật, dùng chung.
+const faceTemplates = new Map();
+function faceTemplate(kind, cfg, female) {
+  if (faceTemplates.has(kind)) return faceTemplates.get(kind);
+  const { plate, fs, eyeX, eyeY, browY, cheekX, cheekY } = cfg;
   const plateZ = (x, y) =>
     plate.cz - plate.rz * Math.sqrt(Math.max(0, 1 - (x / plate.rx) ** 2 - ((y - plate.cy) / plate.ry) ** 2));
+  const ew = (female ? 0.082 : 0.075) * fs;
+  const eh = (female ? 0.078 : 0.062) * fs;
+  const pr = female ? 0.038 : 0.028; // đồng tử to hơn ở mặt nữ
+  const pupilY = eyeY - 0.004 * fs;
+  const whites = [];
+  const pupils = [];
+  const shines = [];
+  const dark = []; // lông mày + mi
+  const cheeks = [];
+  for (const side of [-1, 1]) {
+    const x = side * eyeX;
+    const zEye = plateZ(x, eyeY);
+    whites.push(placedGeometry(g.eye, [ew, eh, 0.03 * fs], [x, eyeY, zEye - 0.004]));
+    // đồng tử nằm ngay trên mặt trước tròng trắng (tròng trắng dày 0.03 * fs); đặt thấp hơn thì bị chìm mất
+    pupils.push(placedGeometry(g.eye, [pr * fs, pr * 1.15 * fs, 0.012 * fs], [x - side * 0.012 * fs, pupilY, zEye - 0.004 - 0.028 * fs]));
+    if (female) {
+      shines.push(placedGeometry(g.eye, [0.012 * fs, 0.012 * fs, 0.012 * fs], [x + side * 0.01 * fs, eyeY + 0.016 * fs, zEye - 0.004 - 0.036 * fs]));
+      // mi: ba nét nhỏ ở đuôi mắt phía ngoài
+      for (let i = 0; i < 3; i++) {
+        const a = 0.35 + i * 0.35;
+        dark.push(placedGeometry(g.lash, [0.03 * fs, 0.008 * fs, 1], [x + side * (ew * 0.8 + 0.012 * fs + i * 0.004 * fs), eyeY + eh * (0.45 + i * 0.28), zEye - 0.012 * fs], side * a));
+      }
+    }
+    if (female) {
+      // mày dịu: đầu trong hơi cao
+      dark.push(placedGeometry(g.brow, [0.08 * fs, 0.014 * fs, 1], [x, browY + 0.02 * fs, plateZ(x, browY) - 0.006], -side * 0.12));
+      const cx = side * cheekX;
+      cheeks.push(placedGeometry(g.cheek, [0.06 * fs, 0.06 * fs, 0.06 * fs], [cx, cheekY, plateZ(cx, cheekY) - 0.004]));
+    } else {
+      // đầu trong thấp hơn: hơi cau mày
+      dark.push(placedGeometry(g.brow, [0.11 * fs, 0.022 * fs, 1], [x, browY, plateZ(x, browY) - 0.006], side * 0.3));
+    }
+  }
+  // dịch hình về tâm y của hàng mắt, để co y (chớp mắt) quanh đúng tâm
+  const whitesGeo = mergeList(whites).translate(0, -eyeY, 0);
+  const pupilsGeo = mergeList(pupils).translate(0, -pupilY, 0);
+  const template = {
+    plateZ,
+    pupilY,
+    whitesGeo,
+    pupilsGeo,
+    shineGeo: shines.length ? mergeList(shines) : null,
+    darkGeo: mergeList(dark),
+    cheekGeo: cheeks.length ? mergeList(cheeks) : null,
+  };
+  faceTemplates.set(kind, template);
+  return template;
+}
+
+// Trả về { group, eyes, mouthMeshes }
+function buildFace(cfg, female, kind) {
+  const { plate, fs, eyeY, mouthY } = cfg;
+  const t = faceTemplate(kind, cfg, female);
   const group = new THREE.Group();
   const p = new THREE.Mesh(unitSphere, m.skin);
   p.scale.set(plate.rx, plate.ry, plate.rz);
   p.position.set(0, plate.cy, plate.cz);
   group.add(p);
 
-  const eyes = [];
-  const ew = (female ? 0.082 : 0.075) * fs;
-  const eh = (female ? 0.078 : 0.062) * fs;
-  for (const side of [-1, 1]) {
-    const x = side * eyeX;
-    const white = new THREE.Mesh(g.eye, m.white);
-    white.scale.set(ew, eh, 0.03 * fs);
-    white.position.set(x, eyeY, plateZ(x, eyeY) - 0.004);
-    const pr = female ? 0.038 : 0.028; // đồng tử to hơn ở mặt nữ
-    const pupil = new THREE.Mesh(g.eye, m.dark);
-    pupil.scale.set(pr * fs, pr * 1.15 * fs, 0.012 * fs);
-    // nằm ngay trên mặt trước tròng trắng (tròng trắng dày 0.03 * fs); đặt thấp hơn thì bị chìm mất
-    pupil.position.set(x - side * 0.012 * fs, eyeY - 0.004 * fs, plateZ(x, eyeY) - 0.004 - 0.028 * fs);
-    group.add(white, pupil);
-    eyes.push([white, white.scale.y], [pupil, pupil.scale.y]);
-    if (female) {
-      const shine = new THREE.Mesh(g.eye, m.white);
-      shine.scale.setScalar(0.012 * fs);
-      shine.position.set(x + side * 0.01 * fs, eyeY + 0.016 * fs, plateZ(x, eyeY) - 0.004 - 0.036 * fs);
-      group.add(shine);
-      // mi: ba nét nhỏ ở đuôi mắt phía ngoài
-      for (let i = 0; i < 3; i++) {
-        const lash = new THREE.Mesh(g.lash, m.dark);
-        lash.scale.set(0.03 * fs, 0.008 * fs, 1);
-        const a = 0.35 + i * 0.35;
-        lash.position.set(x + side * (ew * 0.8 + 0.012 * fs + i * 0.004 * fs), eyeY + eh * (0.45 + i * 0.28), plateZ(x, eyeY) - 0.012 * fs);
-        lash.rotation.z = side * a;
-        group.add(lash);
-      }
-    }
-    const brow = new THREE.Mesh(g.brow, m.dark);
-    if (female) {
-      brow.scale.set(0.08 * fs, 0.014 * fs, 1);
-      brow.position.set(x, browY + 0.02 * fs, plateZ(x, browY) - 0.006);
-      brow.rotation.z = -side * 0.12; // mày dịu: đầu trong hơi cao
-    } else {
-      brow.scale.set(0.11 * fs, 0.022 * fs, 1);
-      brow.position.set(x, browY, plateZ(x, browY) - 0.006);
-      brow.rotation.z = side * 0.3; // đầu trong thấp hơn: hơi cau mày
-    }
-    group.add(brow);
-    if (female) {
-      const cheek = new THREE.Mesh(g.cheek, m.cheekF);
-      const cx = side * cheekX;
-      cheek.scale.setScalar(0.06 * fs);
-      cheek.position.set(cx, cheekY, plateZ(cx, cheekY) - 0.004);
-      group.add(cheek);
-    }
-  }
+  const whites = new THREE.Mesh(t.whitesGeo, m.white);
+  whites.position.y = eyeY;
+  const pupils = new THREE.Mesh(t.pupilsGeo, m.dark);
+  pupils.position.y = t.pupilY;
+  group.add(whites, pupils, new THREE.Mesh(t.darkGeo, m.dark));
+  if (t.shineGeo) group.add(new THREE.Mesh(t.shineGeo, m.white));
+  if (t.cheekGeo) group.add(new THREE.Mesh(t.cheekGeo, m.cheekF));
+  const eyes = [[whites, 1], [pupils, 1]];
 
   const mouthMat = female ? m.mouthF : m.mouthM;
   const mouthMeshes = makeMouthGeos(fs).map(({ geom, hw, hh }, i, all) => {
@@ -260,7 +320,7 @@ function buildFace(cfg, female) {
     const isSmile = i === all.length - 1;
     const my = mouthY + (isSmile ? 0.03 * fs : 0);
     // chỗ nhô ra nhiều nhất của mặt trong phạm vi hình (mép trên và hai đầu) quyết định độ nhô của miệng
-    const zFront = Math.min(plateZ(0, my + hh), plateZ(0, my - hh), plateZ(hw, my), plateZ(-hw, my), plateZ(0, my));
+    const zFront = Math.min(t.plateZ(0, my + hh), t.plateZ(0, my - hh), t.plateZ(hw, my), t.plateZ(-hw, my), t.plateZ(0, my));
     mesh.position.set(0, my, zFront - 0.006);
     if (isSmile) mesh.rotation.z = Math.PI; // nửa vòng dưới = nụ cười
     mesh.visible = isSmile;
@@ -274,6 +334,7 @@ function buildFace(cfg, female) {
 // kind: một khoá của KINDS (looks.js); đổi kiểu thì phải tạo lại.
 export function createFruit(baseColor, kind = 'chubby_m') {
   const { shape, gender } = KINDS[kind] ?? KINDS.chubby_m;
+  const kindKey = KINDS[kind] ? kind : 'chubby_m';
   const cfg = SHAPES[shape];
   const female = gender === 'f';
   const wrap = new THREE.Group(); // main.js co giãn x/z nhóm này; y do pose() lo
@@ -294,7 +355,7 @@ export function createFruit(baseColor, kind = 'chubby_m') {
     upper.add(headMesh);
   }
 
-  const { group: face, eyes, mouthMeshes } = buildFace(cfg, female);
+  const { group: face, eyes, mouthMeshes } = buildFace(cfg, female, kindKey);
   upper.add(face);
 
   // Chân: mỗi chân là một nhóm xoay quanh hông, bàn chân bé xíu ở cuối; đi thì vung luân phiên
@@ -361,12 +422,12 @@ export function createFruit(baseColor, kind = 'chubby_m') {
     bodyMat.emissive.copy(bodyMat.color);
     hatOn = look.hat !== 'none';
     // chỗ trang trí trên đầu: nơ (nữ, thân mập) hoặc lá/cuống; có mũ thì mũ thay cho các thứ này
-    topper = placed(female && shape === 'chubby' ? buildBow() : buildTopper(look.fruit), cfg.topper);
+    topper = placed(female && shape === 'chubby' ? mergedParts('bow', buildBow) : mergedParts(`topper:${look.fruit}`, () => buildTopper(look.fruit)), cfg.topper);
     topper.visible = faceVisible && !hatOn;
     upper.add(topper);
     hair = null;
     if (shape === 'slim') {
-      hair = buildHair();
+      hair = mergedParts(`hair:${kindKey}`, buildHair);
       hair.visible = faceVisible;
       upper.add(hair);
     }

@@ -49,8 +49,9 @@
       }
       #mixer .box {
         background: #14161c; border: 1px solid #3a4050; border-radius: 10px; padding: 14px 18px;
-        max-width: 96vw; max-height: 94vh; overflow: auto; box-sizing: border-box;
+        max-width: 96%; max-height: 94%; overflow: auto; box-sizing: border-box; /* % chứ không dùng vh/vw: điện thoại cầm dọc thì trang bị xoay ngang bằng CSS nên vh/vw sai */
       }
+      #mixer .head { position: sticky; top: -14px; margin: -14px -18px 6px; padding: 10px 18px 6px; background: #14161c; display: flex; align-items: center; justify-content: space-between; gap: 10px; z-index: 1; } /* nút đóng luôn thấy, không phải cuộn xuống */
       #mixer h2 { margin: 0 0 2px; font-size: 18px; color: #ffd36b; }
       #mixer small { opacity: 0.65; }
       #mixer-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 6px 22px; margin: 10px 0; }
@@ -141,6 +142,9 @@
       #game .g-earn-row { display: flex; flex-direction: column; background: #1d212a; border-radius: 8px; padding: 5px 8px; font-size: 13px; }
       #game .g-earn-row b { color: #6bd1ff; }
       #login { z-index: 20; background: #000; }
+      #login select, #login #room-pass { font-size: 16px; padding: 8px; max-width: 80vw; }
+      #login #room-pass { width: 380px; }
+      #room-name { color: #ffd36b; font-size: 14px; }
       #menu button, #login button { font-size: 16px; padding: 10px 20px; cursor: pointer; }
       #menu #look-menu { display: flex; flex-direction: column; align-items: center; gap: 6px; max-width: 92vw; }
       #menu #look-selects { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 14px; font-size: 13px; }
@@ -351,6 +355,8 @@
     <form id="login">
       <h2>Rạp chiếu phim 3D</h2>
       <input id="name" type="text" maxlength="20" placeholder="Tên của bạn" autocomplete="off" required />
+      <div class="row"><label for="room-select">Phòng</label><select id="room-select"></select></div>
+      <input id="room-pass" type="password" placeholder="Mật khẩu phòng" autocomplete="off" />
       <div class="row"><label for="color">Màu avatar</label><input id="color" type="color" /></div>
       <button type="submit">Vào phòng</button>
       <div id="login-msg"></div>
@@ -402,7 +408,10 @@
 
     <div id="mixer">
       <div class="box">
-        <h2>Bảng âm thanh mic hát</h2>
+        <div class="head">
+          <h2>Bảng âm thanh mic hát</h2>
+          <button id="mixer-close-top">Đóng</button>
+        </div>
         <small>Cả phòng dùng chung: bạn chỉnh thì người đang hát và khán giả nghe đổi theo ngay. Nhấn E hoặc Esc để đóng.</small>
         <div id="mixer-groups"></div>
         <div class="actions">
@@ -423,8 +432,10 @@
     </div>
 
     <div id="menu">
+      <div id="room-name"></div>
       <button id="enter">Vào rạp</button>
       <button id="mic">Bật/tắt mic</button>
+      <button id="leave">Rời phòng</button>
       <div class="row">
         <input id="url" type="text" placeholder="Dán link YouTube..." />
         <button id="load" class="vbtn" title="Chiếu video này" aria-label="Chiếu video này">

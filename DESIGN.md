@@ -4,7 +4,7 @@ Tài liệu này mô tả hệ thống **đang có trong code** (không phải k
 
 ## 1. Hệ thống là gì
 
-Một trang web 3D mô phỏng phòng chiếu phim. Tối đa **10 người** vào **một phòng duy nhất**, đi lại, nói chuyện bằng giọng, nhắn tin, cùng xem **một video YouTube đồng bộ** trên màn hình lớn, ngồi ghế, lên sân khấu hát karaoke và đánh nhau cho vui. Chạy được trên máy tính và điện thoại (điện thoại phải xoay ngang).
+Một trang web 3D mô phỏng phòng chiếu phim. Có **3 phòng** (1 phòng riêng cần mật khẩu, 2 phòng khách), mỗi phòng tối đa **10 người** (cả rạp tối đa 30), đi lại, nói chuyện bằng giọng, nhắn tin, cùng xem **một video YouTube đồng bộ** trên màn hình lớn, ngồi ghế, lên sân khấu hát karaoke và đánh nhau cho vui. Chạy được trên máy tính và điện thoại (điện thoại phải xoay ngang).
 
 Phong cách đồ hoạ tối giản (toàn hình khối cơ bản, không có model 3D hay ảnh nền).
 
@@ -24,7 +24,7 @@ Phong cách đồ hoạ tối giản (toàn hình khối cơ bản, không có m
 
 - **Server** (Express + Socket.IO) giữ trạng thái chung trong **bộ nhớ**: danh sách người chơi, ai ngồi ghế nào, ai hát, video đang chiếu. Server cũng phục vụ luôn file web đã build.
 - **Client** vẽ cảnh 3D, gửi vị trí của mình, nhận trạng thái của người khác, và tự lo âm thanh.
-- **Giọng nói đi thẳng giữa các trình duyệt** (WebRTC mesh); server chỉ chuyển tiếp tin báo hiệu để họ tìm thấy nhau.
+- **Giọng nói đi thẳng giữa các trình duyệt** (WebRTC mesh); server chỉ chuyển tiếp tin báo hiệu để họ tìm thấy nhau. Chỉ nối với người ở gần (và người đang hát), xa quá thì ngắt, nên phòng đông cũng chỉ giữ vài đường.
 - **Video không đi qua server**: mỗi người tự tải từ YouTube; server chỉ giữ "đang chiếu gì, đang ở giây nào, đang phát hay dừng" để mọi người bám theo.
 
 ## 3. Công nghệ
@@ -32,7 +32,7 @@ Phong cách đồ hoạ tối giản (toàn hình khối cơ bản, không có m
 | Phần | Dùng | Ghi chú |
 |---|---|---|
 | Đồ hoạ 3D | Three.js + Vite | WebGL cho cảnh; CSS3DRenderer cho video |
-| Realtime | Node.js + Express + Socket.IO | một phòng, trạng thái trong RAM |
+| Realtime | Node.js + Express + Socket.IO | mỗi phòng một namespace (`/ae`, `/khach1`, `/khach2`), trạng thái trong RAM |
 | Video | YouTube IFrame Player API | chỉ nhúng trình phát chính thức |
 | Giọng nói | WebRTC thuần (mesh) | báo hiệu qua Socket.IO, STUN Google + TURN tuỳ chọn |
 | Âm thanh | Web Audio API | hiệu ứng bước chân, tát, chuỗi hiệu ứng mic hát |
@@ -236,7 +236,7 @@ Số lượng ghế (18) và sân khấu (2) được **khai báo ở hai nơi**
 
 ## 9. Giới hạn đã biết
 
-- **Trạng thái nằm trong RAM**: server khởi động lại hoặc ngủ (gói free Render ngủ sau ~15 phút không dùng, mở lại mất khoảng nửa phút) thì mất phòng và video; mọi người vào lại là được. Một phòng duy nhất, tối đa 10 người.
+- **Trạng thái nằm trong RAM**: server khởi động lại hoặc ngủ (gói free Render ngủ sau ~15 phút không dùng, mở lại mất khoảng nửa phút) thì mất phòng và video; mọi người vào lại là được. Ba phòng, mỗi phòng tối đa 10 người (cả rạp tối đa 30).
 - **Voice qua mạng khác nhau có thể không nối được** nếu chưa cấu hình TURN.
 - **Voice trên iPhone/iPad chưa được kiểm chứng trên thiết bị thật** (chỉ thử bằng Chrome tự động). Có cơ chế dự phòng nhưng hiệu quả thực tế chưa biết.
 - **Các tỉ lệ âm lượng** (bước chân 1/20, tát 1/2, mic hát 3/4, voice 3/5) là **mức cài đặt so với mức tối đa**, không phải độ to đo được so với YouTube; nghe bằng tai rồi chỉnh các hằng số.
@@ -256,4 +256,4 @@ Số lượng ghế (18) và sân khấu (2) được **khai báo ở hai nơi**
 | Đèn sân khấu | `client/src/scene/cinema.js` | `STAGE_BEAM_OPACITY`, `STAGE_BEAM_RADIUS`... |
 | Vị trí màn hình nhắc lời | `client/src/scene/cinema.js` | `MONITOR_SIDE_OFFSET`, `MONITOR_CENTER_Y` |
 | Tầm đánh, thời gian choáng | `server/index.js` | `PUNCH_RANGE`, `STUN_MS`, `PUNCH_COOLDOWN_MS` |
-| Số người tối đa | `server/index.js` | `MAX_PLAYERS` |
+| Số người tối đa mỗi phòng, danh sách phòng | `client/src/rooms.js` | `MAX_PLAYERS`, `ROOMS` |

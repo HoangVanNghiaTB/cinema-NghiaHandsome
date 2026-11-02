@@ -229,7 +229,9 @@ export function buildCinema(scene, { lowQuality = false } = {}) {
   ceiling.position.set(cx, ROOM.height, cz);
   scene.add(ceiling);
 
-  // Ảnh treo giữa bức tường sau (đối diện màn hình), giữ nguyên tỉ lệ ảnh
+  // Ảnh treo giữa bức tường sau (đối diện màn hình), giữ nguyên tỉ lệ ảnh. Chỉ phòng có ảnh mới hiện (setPhotoVisible)
+  let photoMesh = null;
+  let photoVisible = true;
   new THREE.TextureLoader().load(WALL_PHOTO_URL, (texture) => {
     texture.colorSpace = THREE.SRGBColorSpace;
     const aspect = texture.image.width / texture.image.height;
@@ -239,6 +241,8 @@ export function buildCinema(scene, { lowQuality = false } = {}) {
     );
     photo.rotation.y = Math.PI; // quay mặt ảnh về phía màn hình/khán giả
     photo.position.set(cx, ROOM.height / 2, ROOM.maxZ - 0.02); // sát tường, thụt ra chút để không bị chập mặt
+    photo.visible = photoVisible;
+    photoMesh = photo;
     scene.add(photo);
   });
 
@@ -444,6 +448,10 @@ export function buildCinema(scene, { lowQuality = false } = {}) {
     screen,
 
     // Bật/tắt đèn sân khấu số `index` (sáng/tắt dần êm, xem updateEffects)
+    setPhotoVisible(visible) {
+      photoVisible = visible;
+      if (photoMesh) photoMesh.visible = visible;
+    },
     setStageLight(index, on) {
       if (stageLights[index]) stageLights[index].target = on ? 1 : 0;
     },

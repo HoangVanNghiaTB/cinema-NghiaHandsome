@@ -319,16 +319,14 @@ const hud = $('voice-status');
 let voiceMode = null; // null (chưa bật) | 'mic' | 'listen-only'
 let micOn = false;
 function updateHud() {
+  // "mic x/y": x người đã nối voice được với mình trong y người khác ở trong phòng; chữ sáng xanh khi mic đang bật
   if (voiceMode === null) {
-    hud.textContent = 'Voice: chưa bật';
+    hud.textContent = 'mic -/-';
   } else {
-    // "nối x/y": x người đã nối voice được với mình trong y người khác ở trong phòng
     const { connected, total } = voice.status();
-    const link = total > 0 ? ` · nối ${connected}/${total}` : '';
-    if (voiceMode === 'listen-only') hud.textContent = `Voice: chỉ nghe (không có mic)${link}`;
-    else if (isTouch) hud.textContent = (micOn ? 'Mic: BẬT' : 'Mic: tắt') + link;
-    else hud.textContent = (micOn ? 'Mic: BẬT (nhấn M để tắt)' : 'Mic: tắt (nhấn M để nói)') + link;
+    hud.textContent = `mic ${connected}/${total}`;
   }
+  hud.classList.toggle('on', voiceMode === 'mic' && micOn);
   touch?.setMicOn(micOn);
 }
 const voice = createVoice({
@@ -344,13 +342,18 @@ function toggleMic() {
   micOn = voice.toggleMic();
   updateHud();
 }
+let voiceStarting = null; // Promise đang xin quyền mic (tránh gọi hai lần)
+// Bật voice (trình duyệt hỏi quyền mic lần đầu); trả về Promise<'mic' | 'listen-only'>
 function startVoice() {
-  if (voiceMode !== null) return;
-  voice.start().then((mode) => {
+  if (voiceMode !== null) return Promise.resolve(voiceMode);
+  voiceStarting ??= voice.start().then((mode) => {
     voiceMode = mode;
+    voiceStarting = null;
     if (mode === 'listen-only') msg.textContent = 'Không dùng được mic, bạn chỉ nghe được người khác.';
     updateHud();
+    return mode;
   });
+  return voiceStarting;
 }
 $('mic').addEventListener('click', () => (voiceMode === null ? startVoice() : toggleMic()));
 
@@ -490,7 +493,12 @@ buildLookMenu();
 
 // Mạng
 let room = null;
-const setNetStatus = (text) => ($('net').textContent = text);
+// Chấm xanh + "onl" khi đã nối server, chấm xám + "off" khi chưa vào phòng hoặc mất kết nối
+function setNetStatus(online) {
+  const net = $('net');
+  net.classList.toggle('online', online);
+  net.lastElementChild.textContent = online ? 'onl' : 'off';
+}
 
 function joinRoom(profile) {
   fpEat.setEating(false);
@@ -675,10 +683,10 @@ function joinRoom(profile) {
         stunRing.hide();
         controls.pointerSpeed = 1;
         voice.reset();
-        setNetStatus('○ Mất kết nối, đang thử lại...');
+        setNetStatus(false);
         msg.textContent = 'Mất kết nối tới server, đang thử lại...';
       } else {
-        setNetStatus('● Đã kết nối');
+        setNetStatus(true);
         msg.textContent = '';
       }
     },
@@ -701,7 +709,7 @@ function showLogin(message = '') {
   $('login-msg').textContent = message;
   login.style.display = 'flex';
   menu.style.display = 'none';
-  setNetStatus('○ Chưa vào phòng');
+  setNetStatus(false);
 }
 
 const savedProfile = loadProfile();
@@ -763,11 +771,26 @@ const paidSingers = new Set(); // id những người đã trả điểm và đa
 const singPrompt = $('sing-prompt');
 const showSingPrompt = (show) => (singPrompt.style.display = show ? 'flex' : 'none');
 const singPromptOpen = () => singPrompt.style.display === 'flex';
-function answerSing(yes) {
-  if (!room || myStage === null || myStagePaid) return;
+let singAsking = false; // đang chờ người dùng cho phép mic
+async function answerSing(yes) {
+  if (!room || myStage === null || myStagePaid || singAsking) return;
+  if (!yes) {
+    showSingPrompt(false);
+    room.stopSing();
+    return;
+  }
+  // Hát cần mic: xin quyền mic trước, có mic rồi mới gửi yêu cầu trả điểm (server mới trừ điểm)
+  singAsking = true;
+  const mode = await startVoice();
+  singAsking = false;
+  if (!room || myStage === null || myStagePaid) return; // trong lúc chờ đã xuống sân khấu / hết giờ
   showSingPrompt(false);
-  if (yes) room.singPay();
-  else room.stopSing();
+  if (mode !== 'mic') {
+    showToast('Cần cho phép dùng micro để hát. Điểm của bạn chưa bị trừ.');
+    room.stopSing();
+    return;
+  }
+  room.singPay();
 }
 $('sing-yes').addEventListener('click', () => answerSing(true));
 $('sing-no').addEventListener('click', () => answerSing(false));
@@ -1036,12 +1059,13 @@ function closeGame() {
   gameHost.close();
 }
 $('game-close').addEventListener('click', closeGame);
-// Ví điểm (tặng điểm, cửa hàng): phím P, hoặc chạm vào số điểm ở góc màn hình
+// Ví điểm (tặng điểm, cửa hàng): phím P, hoặc nút 💰 cạnh nút ẩn/hiện phím ảo trên điện thoại
 function openWallet() {
   if (!room || !myId || isStunned()) return;
   openGame('wallet');
 }
-$('points').addEventListener('click', openWallet);
+$('btn-wallet').addEventListener('click', openWallet);
+
 addEventListener('keydown', (e) => {
   if (gameOpen && e.code === 'Escape') closeGame();
 });
@@ -1067,11 +1091,7 @@ function interact() {
     return;
   }
   if (nearestFreeStage() >= 0) {
-    if (voiceMode !== 'mic') {
-      addChatLine('Cần cho phép dùng micro để hát.', { system: true });
-      return;
-    }
-    room.sing(nearestFreeStage());
+    room.sing(nearestFreeStage()); // lên sân khấu không cần mic; mic chỉ cần khi đồng ý trả điểm để hát (answerSing)
     return;
   }
   const seat = nearestFreeSeat();

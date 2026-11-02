@@ -134,8 +134,8 @@ export default {
 
     canvas.addEventListener('pointerdown', (e) => {
       if (!s || s.winner || mySide() !== s.turn || !s.seats.R || !s.seats.Y) return;
-      const r = canvas.getBoundingClientRect();
-      const col = Math.floor((e.clientX - r.left) / (r.width / COLS));
+      // offsetX là toạ độ trong chính bàn cờ, đúng cả khi điện thoại cầm dọc (trang bị xoay ngang bằng CSS); clientX là toạ độ màn hình nên lệch cột
+      const col = Math.floor(e.offsetX / (canvas.clientWidth / COLS));
       if (col >= 0 && col < COLS) ctx.send({ op: 'drop', col });
     });
 

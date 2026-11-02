@@ -1,3 +1,5 @@
+import { mapDelta } from '../ui/viewport.js';
+
 // Đồ dùng chung của các game treo tường
 
 export function el(tag, className, text) {
@@ -22,8 +24,8 @@ export function onSwipe(target, cb, minDist = 24) {
   };
   const up = (e) => {
     if (!start) return;
-    const dx = e.clientX - start.x;
-    const dy = e.clientY - start.y;
+    // điện thoại cầm dọc thì trang bị xoay 90° bằng CSS, ngón vuốt phải đổi sang toạ độ trang
+    const { x: dx, y: dy } = mapDelta(e.clientX - start.x, e.clientY - start.y);
     start = null;
     if (Math.max(Math.abs(dx), Math.abs(dy)) < minDist) return;
     cb(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : dy > 0 ? 'down' : 'up');

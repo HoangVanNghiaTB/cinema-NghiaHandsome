@@ -39,7 +39,7 @@ const SHAPES = {
     fs: 0.7, eyeX: 0.088, eyeY: 0.875, browY: 0.945, cheekX: 0.14, cheekY: 0.8, mouthY: 0.765,
     hip: { x: 0.09, y: 0.19, z: -0.04, len: 0.145 },
     top: 1.15,
-    acc: { hat: { s: 0.85, y: 0.25, z: 0 }, ears: { s: 0.7, y: 0.378, z: 0 }, glasses: { s: 0.7, y: 0.41, z: -0.03 }, back: { s: 0.6, y: 0.07, z: -0.09 } },
+    acc: { hat: { s: 0.85, y: 0.25, z: 0 }, ears: { s: 0.7, y: 0.378, z: 0 }, glasses: { s: 0.7, y: 0.41, z: 0.015 }, back: { s: 0.6, y: 0.07, z: -0.09 } },
     topper: { s: 0.8, y: 0.28 },
     hands: { scale: 0.6, restX: 0.3, forward: 0.06 },
     seatForward: -0.1,

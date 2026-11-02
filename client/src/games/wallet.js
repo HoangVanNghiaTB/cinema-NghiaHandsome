@@ -2,7 +2,7 @@ import { el } from './util.js';
 import { ITEM_PRICES, LOOK_OPTIONS, LOOK_LABELS, itemKey } from '../scene/looks.js';
 import { TIP_AMOUNTS, EARN_RULES, SING_COST } from '../economy.js';
 
-// Ví điểm (mở bằng phím P hoặc chạm vào số điểm trên góc màn hình): tặng điểm cho người khác, mua phụ kiện, xem cách kiếm điểm.
+// Ví điểm (mở bằng phím P, hoặc nút 💰 cạnh nút ẩn/hiện phím ảo trên điện thoại): tặng điểm cho người khác, mua phụ kiện, xem cách kiếm điểm.
 // Không phải game nên không có phòng riêng ở server (local: true); điểm và phụ kiện đã mua lấy từ ctx.wallet().
 const TABS = [['tip', 'Tặng điểm'], ['shop', 'Cửa hàng'], ['earn', 'Kiếm điểm']];
 

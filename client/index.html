@@ -196,7 +196,12 @@
       body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 
       /* Điểm của rạp: số điểm ở góc (chạm để mở ví), thông báo cộng/trừ điểm, và hỏi trả điểm để hát. Đều nhỏ, ở mép màn hình, không che cảnh */
-      #points { pointer-events: auto; cursor: pointer; margin-top: 3px; }
+      /* Trạng thái gọn: chấm xanh + onl, mic đã nối / tổng, số điểm. Mic bật thì chữ "mic" sáng xanh */
+      #net { display: flex; align-items: center; gap: 6px; }
+      #net .dot { width: 9px; height: 9px; border-radius: 50%; background: #8a8f99; display: inline-block; }
+      #net.online .dot { background: #3ddc6b; box-shadow: 0 0 5px #3ddc6b; }
+      #voice-status { opacity: 0.75; }
+      #voice-status.on { opacity: 1; color: #7dff9a; }
       #toasts { position: fixed; top: 74px; left: 12px; z-index: 14; pointer-events: none; display: flex; flex-direction: column; gap: 4px; }
       #toasts .toast { background: rgba(0, 0, 0, 0.7); color: #fff; padding: 3px 9px; border-radius: 6px; font-size: 13px; max-width: 70vw; }
       body.game-open #toasts { top: auto; bottom: 10px; left: 50%; transform: translateX(-50%); align-items: center; } /* đang mở game / ví thì xuống dưới, khỏi đè tiêu đề */
@@ -269,9 +274,13 @@
         display: none; position: absolute; top: max(12px, env(safe-area-inset-top));
         right: calc(max(12px, env(safe-area-inset-right)) + 108px); width: 44px; height: 44px; font-size: 20px;
       }
+      #touch-ui #btn-wallet {
+        position: absolute; top: max(12px, env(safe-area-inset-top)); right: calc(max(12px, env(safe-area-inset-right)) + 162px);
+        width: 44px; height: 44px; font-size: 20px;
+      }
       #touch-ui #btn-hide {
         position: absolute; top: max(12px, env(safe-area-inset-top));
-        right: calc(max(12px, env(safe-area-inset-right)) + 162px); width: 32px; height: 32px; font-size: 14px; opacity: 0.8;
+        right: calc(max(12px, env(safe-area-inset-right)) + 216px); width: 32px; height: 32px; font-size: 14px; opacity: 0.8;
       }
       /* Ẩn phím ảo: chỉ còn nút menu và nút bật/tắt này; vùng kéo nhìn vẫn dùng được */
       #touch-ui.ui-hidden :is(#joy, #touch-buttons, #action-panel, #btn-view, #btn-eye) { display: none !important; }
@@ -348,9 +357,9 @@
     </form>
 
     <div id="hud">
-      <div id="net">○ Chưa vào phòng</div>
-      <div id="voice-status">Voice: chưa bật</div>
-      <div id="points" title="Ví điểm: tặng điểm, mua phụ kiện (phím P)">💰 <b id="points-n">500</b> điểm</div>
+      <div id="net"><i class="dot"></i><span>off</span></div>
+      <div id="voice-status">mic -/-</div>
+      <div id="points">💰 <b id="points-n">500</b> điểm</div>
       <div id="fps"></div>
     </div>
 
@@ -374,6 +383,7 @@
       <button id="btn-view" aria-label="Đổi góc nhìn">&#128247;</button>
       <button id="btn-hide" aria-label="Ẩn/hiện phím ảo">&#127918;</button>
       <button id="btn-eye"aria-label="Xoay mắt nhìn quanh nhân vật">&#128065;</button>
+      <button id="btn-wallet" aria-label="Ví điểm: tặng điểm, mua phụ kiện">&#128176;</button>
       <div id="action-panel">
         <button data-action="clap"><span class="emoji">&#128079;</span><small>Vỗ tay</small></button>
         <button data-action="confetti"><span class="emoji">&#127881;</span><small>Pháo</small></button>

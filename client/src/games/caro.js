@@ -111,10 +111,10 @@ export default {
 
     canvas.addEventListener('pointerdown', (e) => {
       if (!s || s.winner || mySide() !== s.turn || !s.seats.X || !s.seats.O) return;
-      const r = canvas.getBoundingClientRect();
-      const cell = r.width / s.n;
-      const x = Math.floor((e.clientX - r.left) / cell);
-      const y = Math.floor((e.clientY - r.top) / cell);
+      // offsetX/Y là toạ độ trong chính bàn cờ, đúng cả khi điện thoại cầm dọc (trang bị xoay ngang bằng CSS)
+      const cell = canvas.clientWidth / s.n;
+      const x = Math.floor(e.offsetX / cell);
+      const y = Math.floor(e.offsetY / cell);
       const idx = y * s.n + x;
       if (x < 0 || y < 0 || x >= s.n || y >= s.n || s.board[idx] !== '.') return;
       ctx.send({ op: 'move', idx });

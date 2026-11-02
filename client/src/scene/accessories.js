@@ -50,15 +50,15 @@ function buildHat(type) {
   return g;
 }
 
-// ----- Kính (trước hai mắt) -----
+// ----- Kính (trước hai mắt: mặt trước đồng tử ở z ≈ -0.526, nên kính đặt ở -0.55 để không chìm vào mặt) -----
 function buildGlasses(type) {
   const g = new THREE.Group();
-  g.add(mesh(geo('glassBridge', () => new THREE.CylinderGeometry(0.012, 0.012, 0.09, 6).rotateZ(Math.PI / 2)), 0x15161c, 0, 0.67, -0.445));
+  g.add(mesh(geo('glassBridge', () => new THREE.CylinderGeometry(0.012, 0.012, 0.09, 6).rotateZ(Math.PI / 2)), 0x15161c, 0, 0.67, -0.55));
   for (const side of [-1, 1]) {
     if (type === 'round') {
-      g.add(mesh(geo('glassRing', () => new THREE.TorusGeometry(0.085, 0.017, 8, 22)), 0x15161c, side * 0.125, 0.665, -0.445));
+      g.add(mesh(geo('glassRing', () => new THREE.TorusGeometry(0.085, 0.017, 8, 22)), 0x15161c, side * 0.125, 0.665, -0.55));
     } else {
-      const lens = mesh(geo('sunLens', () => new THREE.CylinderGeometry(0.09, 0.09, 0.025, 20).rotateX(Math.PI / 2)), 0x0c0d12, side * 0.125, 0.665, -0.445);
+      const lens = mesh(geo('sunLens', () => new THREE.CylinderGeometry(0.09, 0.09, 0.025, 20).rotateX(Math.PI / 2)), 0x0c0d12, side * 0.125, 0.665, -0.55);
       lens.scale.y = 0.8;
       g.add(lens);
     }

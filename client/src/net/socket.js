@@ -51,6 +51,7 @@ export function connectToRoom({ name, color, look, room, password }, handlers) {
   socket.on('game-denied', () => handlers.onGameDenied?.());
   socket.on('game-cue', (d) => handlers.onGameCue?.(d));
   socket.on('game-brief', (d) => handlers.onGameBrief?.(d));
+  socket.on('game-win', (d) => handlers.onGameWin?.(d));
   socket.on('mix-state', (m) => handlers.onMix?.(m));
   socket.on('look-update', (d) => handlers.onLook?.(d));
   socket.on('video-state', (v) => handlers.onVideo?.(v));

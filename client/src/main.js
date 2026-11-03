@@ -631,6 +631,7 @@ function joinRoom(profile) {
     onGameCue: (d) => gameHost.onCue(d),
     onGameDenied: () => closeGame(), // server không cho vào (ví dụ Ma Sói khi dưới 100 điểm); lý do hiện bằng thông báo nhỏ
     onGameBrief: ({ game, text }) => gamePanels.setBrief(game, text),
+    onGameWin: ({ game }) => celebrateAtPanel(game),
     onWallet: setWallet,
     onNotice: ({ text }) => showToast(text),
     onLook: ({ id, look }) => avatars.setLook(id, look),
@@ -1184,6 +1185,21 @@ const gameHost = createGameHost({
     else controls.lock();
   },
 });
+// Có người thắng ở một game (Tài xỉu / Bầu cua): pháo giấy bắn từ giữa tranh lên trên cho cả phòng thấy, kịp lúc kết quả hiện ra.
+// Người đang mở chính game đó đã có pháo trong cửa sổ game nên bỏ qua.
+function celebrateAtPanel(game) {
+  const p = GAME_PANELS.find((g) => g.id === game);
+  if (!p) return;
+  const nx = Math.sin(p.ry); // hướng tranh nhìn ra phòng
+  const nz = Math.cos(p.ry);
+  for (let i = 0; i < 6; i++) {
+    setTimeout(() => {
+      if (!room || gameHost.openId === game) return;
+      const along = (Math.random() - 0.5) * 1.6; // rải dọc bề ngang tranh
+      confetti.burst(p.x + nx * 0.3 + nz * along, p.y, p.z + nz * 0.3 - nx * along);
+    }, 1100 + i * 160);
+  }
+}
 function nearGamePanel() {
   if (mySeat !== null || myStage !== null) return null;
   let best = null;

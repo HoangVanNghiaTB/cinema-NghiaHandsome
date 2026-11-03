@@ -578,7 +578,7 @@ function dicePayout(table, dice, bets) {
   return total;
 }
 
-function makeDice({ onChange, players, wallet }) {
+function makeDice({ onChange, players, wallet, onWin }) {
   const tables = {};
   for (const t of Object.keys(DICE_TABLES)) tables[t] = { phase: 'idle', endsAt: 0, bets: new Map(), last: null, history: [], timer: null }; // history: các ván đã ra của phiên này (soi cầu), xoá cùng game khi phòng trống quá lâu
   const sumOf = (spots) => Object.values(spots).reduce((a, b) => a + b, 0);
@@ -596,6 +596,7 @@ function makeDice({ onChange, players, wallet }) {
       results.push({ name: pname, net });
     }
     t.last = { dice, results: results.sort((a, b) => b.net - a.net) };
+    if (results.some((r) => r.net > 0)) onWin?.(); // có người thắng: báo cả phòng bắn pháo giấy ở tranh
     t.history.push(dice);
     if (t.history.length > DICE_HISTORY_KEEP) t.history.shift();
     onChange();
@@ -695,7 +696,7 @@ export function createGames(io, players, wallet, opts = {}) {
     games.g2048 = makeSolo(1000000, { reward, gapMs: () => live().soloGapSec * 1000 || 0, label: '2048', rewardOf: (v) => Math.min(30, Math.floor(v / 150)) });
     games.connect4 = makeConnect4({ awayMs: () => live().duelAwaySec * 1000 || DUEL_AWAY_MS, players, wallet, notify, onChange: () => push('connect4') });
     games.vote = makeVote(players, { reward });
-    games.dice = makeDice({ onChange: () => push('dice'), players, wallet });
+    games.dice = makeDice({ onChange: () => push('dice'), players, wallet, onWin: () => io.emit('game-win', { game: 'dice' }) });
     games.werewolf = makeWerewolf({
       players, wallet, notify, cfg: opts.werewolf,
       onChange: () => push('werewolf'),

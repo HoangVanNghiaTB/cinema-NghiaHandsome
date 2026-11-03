@@ -241,7 +241,7 @@ function renderWho() {
     state.rooms.map((r) => h('div', { class: 'row', style: 'margin:4px 0' },
       h('b', { style: 'min-width:150px' }, r.name + ' (' + r.players.length + '/' + r.max + ')'),
       r.players.length ? h('span', {}, r.players.map((p) => p.name + ' · ' + p.pts + ' điểm').join('   |   ')) : h('span', { class: 'dim' }, 'trống'))),
-    h('div', { class: 'dim' }, 'Muốn chỉnh điểm, khoá chat, đá hay cấm: xuống thẻ của phòng đó bên dưới.'));
+    h('div', { class: 'dim' }, 'Muốn chỉnh điểm, khoá chat, đá hay cấm: dùng thẻ của từng phòng ngay bên dưới.'));
 }
 
 function renderNotice() {
@@ -326,7 +326,8 @@ function render() {
   // Đang gõ vào ô nào thì không vẽ lại, tránh mất chữ đang nhập
   if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
   $('updated').textContent = 'cập nhật ' + fmtTime(state.now);
-  $('content').replaceChildren(renderServer(), renderWho(), renderGeneral(), renderWerewolf(), renderNotice(), state.rooms.map(renderRoom), renderBans(), renderLog());
+  // replaceChildren không tự trải mảng (mảng thẻ phòng sẽ thành chữ "[object HTMLDivElement]"), nên trải và bỏ mục rỗng trước
+  $('content').replaceChildren(...[renderServer(), renderWho(), state.rooms.map(renderRoom), renderBans(), renderNotice(), renderGeneral(), renderWerewolf(), renderLog()].flat().filter(Boolean));
 }
 
 async function refresh() {

@@ -152,10 +152,8 @@ export default {
       } catch {
         // không lưu được thì thôi
       }
-      if (!voiceOn) {
-        for (const a of audios) a.pause();
-        audios.clear();
-      }
+      if (!voiceOn) stopVoice();
+      else unlockAudio();
       syncVoiceBtn();
     });
     syncVoiceBtn();
@@ -173,18 +171,53 @@ export default {
     };
 
     // ----- giọng quản trò -----
-    const audios = new Set();
+    // iPhone chỉ cho một phần tử âm thanh phát tiếng nếu nó đã được "mở khóa" trong lúc người chơi chạm.
+    // Nên tạo sẵn vài phần tử, mở khóa chúng ở lần chạm đầu, rồi dùng lại (chỉ đổi file) cho mọi câu về sau.
+    const SILENCE = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
+    const pool = Array.from({ length: 3 }, () => {
+      const a = new Audio();
+      a.preload = 'auto';
+      a.playsInline = true;
+      return a;
+    });
+    let poolNext = 0;
+    let unlocked = false;
+    function unlockAudio() {
+      if (unlocked) return;
+      unlocked = true; // đặt trước để các lần chạm sau không mở khóa lại
+      for (const a of pool) {
+        if (!a.paused) continue; // đang đọc một câu thì phần tử này đã dùng được rồi
+        a.src = SILENCE;
+        a.play()
+          .then(() => {
+            if (a.src === SILENCE) a.pause(); // không cắt ngang nếu giữa chừng đã nạp câu thật
+          })
+          .catch(() => {
+            unlocked = false; // chưa mở khóa được: thử lại ở lần chạm kế
+          });
+      }
+    }
+    const onTouch = () => unlockAudio();
+    document.addEventListener('touchend', onTouch, true);
+    document.addEventListener('pointerup', onTouch, true);
+    document.addEventListener('click', onTouch, true);
+    function stopVoice() {
+      for (const a of pool) {
+        a.pause();
+        a.removeAttribute('src');
+      }
+    }
     function playCue(clip) {
       if (!clip) return;
       // chữ luôn hiện (kể cả khi chưa có file giọng hoặc người chơi tắt giọng)
       caption = CLIP_TEXT[clip] ?? caption;
       if (captionEl) captionEl.textContent = caption;
       if (!voiceOn) return;
-      const a = new Audio(clipUrl(clip));
-      audios.add(a);
-      a.addEventListener('ended', () => audios.delete(a));
-      a.addEventListener('error', () => audios.delete(a)); // chưa thu file thì bỏ qua
-      a.play().catch(() => audios.delete(a));
+      const a = pool[poolNext++ % pool.length];
+      a.src = clipUrl(clip);
+      a.play().catch(() => {
+        // chưa mở khóa được (iPhone cần một lần chạm) hoặc chưa có file: bỏ qua, chữ vẫn hiện
+      });
     }
 
     // ----- mic: đêm và người chết bị tắt, ban ngày tự do -----
@@ -555,8 +588,10 @@ export default {
       destroy() {
         stopWatch();
         clearInterval(timerId);
-        for (const a of audios) a.pause();
-        audios.clear();
+        document.removeEventListener('touchend', onTouch, true);
+        document.removeEventListener('pointerup', onTouch, true);
+        document.removeEventListener('click', onTouch, true);
+        stopVoice();
         ctx.mic?.lock(false); // đóng cửa sổ thì trả mic về như cũ
       },
     };

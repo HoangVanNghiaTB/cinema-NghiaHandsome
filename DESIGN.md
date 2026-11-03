@@ -95,6 +95,7 @@ cinema-3d/
 - Mỗi người có thanh âm lượng video riêng (chỉ ảnh hưởng máy mình).
 
 ### 5.3 Người chơi và avatar
+- **Thứ tự màn hình lúc mở trang:** intro "Nghia-Cinema-KTV presents" (chạm để bỏ qua) → **màn hình hướng dẫn thao tác** (hai tab Máy tính / Điện thoại, tự chọn sẵn theo thiết bị; bấm **Tiếp tục** hoặc Enter) → màn hình chọn tên, phòng, màu. Hướng dẫn hiện mỗi lần tải lại trang.
 - Vào bằng tên và màu tự chọn (nhớ cho lần sau). Avatar là viên nhộng màu kèm nhãn tên và một khối nhỏ chỉ hướng nhìn.
 - Vị trí gửi khoảng **15 lần/giây** khi có thay đổi; người nhận nội suy cho mượt.
 - Người đang nói thì **avatar sáng lên**.

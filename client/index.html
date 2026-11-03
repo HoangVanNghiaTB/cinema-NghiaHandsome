@@ -250,6 +250,23 @@
         pointer-events: none; color: #fff; background: rgba(0, 0, 0, 0.6); padding: 8px 16px; border-radius: 6px; font-size: 16px;
       }
 
+      /* Màn hình hướng dẫn thao tác: hiện sau intro, bấm Tiếp tục mới tới màn chọn phòng */
+      #guide {
+        position: fixed; inset: 0; z-index: 150; background: #0b0d12; color: #fff; display: flex; flex-direction: column;
+        align-items: center; padding: 14px 16px; box-sizing: border-box; gap: 8px;
+      }
+      #guide h2 { margin: 0; font-size: 20px; color: #ffd36b; }
+      #guide .tabs { display: flex; gap: 8px; }
+      #guide .tabs button { font-size: 15px; padding: 7px 16px; cursor: pointer; }
+      #guide .tabs button.on { background: #0a8a4a; color: #fff; border-color: #0a8a4a; }
+      #guide .body { flex: 1; min-height: 0; width: 100%; max-width: 760px; overflow-y: auto; touch-action: pan-y; }
+      #guide .pane { display: none; }
+      #guide .pane.on { display: block; }
+      #guide .row { display: grid; grid-template-columns: minmax(110px, 190px) 1fr; gap: 6px 12px; padding: 6px 4px; border-bottom: 1px solid #232733; font-size: 14px; }
+      #guide .row b { color: #6bd1ff; font-weight: 600; }
+      #guide .note { font-size: 13px; opacity: 0.75; padding: 8px 4px; }
+      #guide #guide-go { font-size: 17px; padding: 10px 34px; cursor: pointer; background: #0a8a4a; color: #fff; border: 0; border-radius: 8px; }
+
       /* Intro nhà phát hành: chữ hiện lần lượt từng chữ cái, quét sáng một vệt, rồi mờ dần để lộ màn hình nhập tên */
       #intro {
         position: fixed; inset: 0; z-index: 200; background: #000; display: flex; flex-direction: column;
@@ -378,6 +395,59 @@
         var done = function () { if (el.parentNode) el.parentNode.removeChild(el); };
         el.addEventListener('animationend', function (e) { if (e.animationName === 'intro-out') done(); });
         el.addEventListener('click', function () { el.style.animation = 'intro-out 0.3s ease forwards'; });
+      })();
+    </script>
+    <div id="guide">
+      <h2>Cách điều khiển</h2>
+      <div class="tabs">
+        <button type="button" data-tab="pc">&#128187; Máy tính</button>
+        <button type="button" data-tab="phone">&#128241; Điện thoại</button>
+      </div>
+      <div class="body">
+        <div class="pane" data-pane="pc">
+          <div class="row"><b>W A S D</b><span>Đi. Chuột để nhìn quanh (bấm "Vào phòng" để khoá chuột vào game).</span></div>
+          <div class="row"><b>M</b><span>Bật / tắt mic. Mic mặc định tắt, cần cho phép micro trên trình duyệt. Càng gần người nói càng nghe rõ.</span></div>
+          <div class="row"><b>Enter</b><span>Chat chữ (cả phòng đều thấy).</span></div>
+          <div class="row"><b>E</b><span>Đứng gần ghế để ngồi, gần sân khấu để hát karaoke, gần tranh trên tường để chơi game (Caro, Nối 4, Ma Sói...).</span></div>
+          <div class="row"><b>R</b><span>Nhặt rác khi đứng gần để kiếm điểm.</span></div>
+          <div class="row"><b>Chuột trái hoặc F</b><span>Tát người trước mặt (làm họ choáng 2 giây).</span></div>
+          <div class="row"><b>1 2 3 4 5</b><span>Vỗ tay, pháo giấy, lightstick, trái tim, ăn cơm.</span></div>
+          <div class="row"><b>V</b><span>Đổi góc nhìn thứ 1 / thứ 3 (góc 3: Alt để xoay mắt nhìn quanh nhân vật).</span></div>
+          <div class="row"><b>P</b><span>Ví điểm: tặng điểm, mua phụ kiện, xem cách kiếm điểm.</span></div>
+          <div class="row"><b>O</b><span>Chỉnh âm thanh (hiệu ứng, video, giọng người).</span></div>
+          <div class="row"><b>Ctrl</b><span>Hiện thanh nút Ví, Âm thanh, Mic, Góc nhìn, Menu để bấm bằng chuột. Ctrl lần nữa hoặc Esc để quay lại chơi.</span></div>
+          <div class="row"><b>Esc</b><span>Mở menu: dán link YouTube để chiếu video, chất lượng đồ hoạ, đổi nhân vật.</span></div>
+        </div>
+        <div class="pane" data-pane="phone">
+          <div class="row"><b>Xoay ngang</b><span>Bắt buộc cầm ngang màn hình. Bấm "Vào phòng" để vào toàn màn hình.</span></div>
+          <div class="row"><b>Cần gạt trái</b><span>Đi. Kéo ở nửa phải màn hình để nhìn quanh.</span></div>
+          <div class="row"><b>Nút lớn góc phải dưới</b><span>Đánh (tát người trước mặt). Quanh nó là các nút nhỏ.</span></div>
+          <div class="row"><b>Nút ngữ cảnh</b><span>Tự đổi chữ theo chỗ bạn đứng: Ngồi, Hát, Chơi game, Nhặt rác.</span></div>
+          <div class="row"><b>Hành động</b><span>Bấm rồi chọn biểu tượng: vỗ tay, pháo giấy, lightstick, ăn cơm, trái tim.</span></div>
+          <div class="row"><b>Mic, Chat</b><span>Bật / tắt mic (mặc định tắt, cần cho phép micro); nhắn tin chữ cho cả phòng.</span></div>
+          <div class="row"><b>Hàng nút trên cùng</b><span>&#9776; Menu, &#128247; đổi góc nhìn, &#128176; ví điểm, &#128266; chỉnh âm thanh, &#127918; ẩn / hiện phím ảo.</span></div>
+          <div class="row"><b>Trong game</b><span>Chạm vào bàn để chơi. Nút Đóng ở góc trên để thoát; trong Ma Sói có nút mic và nút bật / tắt giọng đọc.</span></div>
+        </div>
+        <div class="note">Mỗi phòng tối đa 10 người. Điểm của bạn dùng chung cho mọi game, hát karaoke và mua phụ kiện. Xem lại hướng dẫn này bằng cách tải lại trang.</div>
+      </div>
+      <button id="guide-go" type="button">Tiếp tục</button>
+    </div>
+    <script>
+      // Màn hình hướng dẫn: chọn sẵn tab theo thiết bị; Tiếp tục thì gỡ đi để lộ màn hình chọn phòng
+      (function () {
+        var el = document.getElementById('guide');
+        var tabs = el.querySelectorAll('.tabs button');
+        var show = function (name) {
+          for (var i = 0; i < tabs.length; i++) tabs[i].classList.toggle('on', tabs[i].getAttribute('data-tab') === name);
+          var panes = el.querySelectorAll('.pane');
+          for (var j = 0; j < panes.length; j++) panes[j].classList.toggle('on', panes[j].getAttribute('data-pane') === name);
+        };
+        for (var i = 0; i < tabs.length; i++) tabs[i].addEventListener('click', function (e) { show(e.currentTarget.getAttribute('data-tab')); });
+        show(matchMedia('(pointer: coarse)').matches ? 'phone' : 'pc');
+        var go = function () { if (el.parentNode) el.parentNode.removeChild(el); document.removeEventListener('keydown', onKey); };
+        var onKey = function (e) { if (e.code === 'Enter') go(); };
+        document.getElementById('guide-go').addEventListener('click', go);
+        document.addEventListener('keydown', onKey);
       })();
     </script>
     <div id="css-layer"></div>

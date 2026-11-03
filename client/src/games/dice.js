@@ -1,4 +1,4 @@
-import { el } from './util.js';
+import { el, confettiBurst } from './util.js';
 import { sfx } from '../audio/sfx.js';
 
 // Bầu cua + Tài xỉu chung một tranh (hai tab). Cả phòng đặt cược bằng điểm chung của rạp trong 20 giây, server lắc xúc xắc (server/games.js).
@@ -32,6 +32,7 @@ export default {
       b.addEventListener('click', () => {
         tab = t;
         shown = null;
+        baseline = false; // đổi tab thì ván đã ra của tab kia không bắn pháo lại
         refresh();
       });
       tabBtns[t] = b;
@@ -42,7 +43,8 @@ export default {
     const verdict = el('div', 'g-dice-verdict');
     diceRow.appendChild(verdict);
     const grid = el('div', 'g-spots');
-    main.append(tabs, diceRow, grid);
+    const hist = el('div', 'g-hist'); // soi cầu: các ván đã ra trong phiên
+    main.append(tabs, diceRow, grid, hist);
 
     const side = el('div', 'g-side');
     const timer = el('div', 'g-timer', '20');
@@ -64,6 +66,8 @@ export default {
     let receivedAt = 0;
     let shown = null; // xúc xắc đã hiện ra (để biết khi nào có kết quả mới mà lắc)
     let rollTimer = null;
+    let baseline = false; // đã thấy một lúc chưa có kết quả trong lần mở này (chỉ khi đó mới bắn pháo, mở bảng giữa chừng thì không)
+    const stops = new Set(); // pháo giấy đang bay, để dừng khi đóng game
 
     const secsLeft = () => {
       const t = s?.tables[tab];
@@ -105,6 +109,47 @@ export default {
       const sum = dice[0] + dice[1] + dice[2] + 3;
       if (dice[0] === dice[1] && dice[1] === dice[2]) return `${sum}: Bộ ba, nhà cái ăn`;
       return `${sum}: ${sum >= 11 ? 'TÀI' : 'XỈU'}`;
+    }
+
+    // Soi cầu: Tài xỉu hiện từng ván (số tổng, đỏ = Tài, xanh = Xỉu, vàng = bộ ba) kèm đếm và cầu đang bệt;
+    // Bầu cua hiện ba linh vật của từng ván kèm số lần ra của mỗi linh vật
+    function renderHistory(list) {
+      hist.replaceChildren();
+      if (!list.length) {
+        hist.appendChild(el('div', 'g-dim', 'Soi cầu: chưa có ván nào trong phiên này'));
+        return;
+      }
+      const head = el('div', 'g-hist-head', `Soi cầu (${list.length} ván gần nhất, mới nhất bên phải)`);
+      const row = el('div', 'g-hist-row');
+      const info = el('div', 'g-hist-info');
+      if (tab === 'taixiu') {
+        const kinds = list.map((d) => (d[0] === d[1] && d[1] === d[2] ? 'b' : d[0] + d[1] + d[2] + 3 >= 11 ? 't' : 'x'));
+        list.forEach((d, i) => {
+          const sum = d[0] + d[1] + d[2] + 3;
+          const chip = el('span', `g-hist-chip ${kinds[i] === 't' ? 'tai' : kinds[i] === 'x' ? 'xiu' : 'bb'}`, String(sum));
+          chip.title = `${d.map((x) => x + 1).join(' ')} = ${sum}${kinds[i] === 'b' ? ' (bộ ba)' : kinds[i] === 't' ? ' Tài' : ' Xỉu'}`;
+          row.appendChild(chip);
+        });
+        const count = (k) => kinds.filter((x) => x === k).length;
+        let run = 1;
+        while (run < kinds.length && kinds[kinds.length - 1 - run] === kinds[kinds.length - 1]) run++;
+        const lastKind = kinds[kinds.length - 1];
+        const name = lastKind === 't' ? 'Tài' : lastKind === 'x' ? 'Xỉu' : 'Bộ ba';
+        info.textContent = `Tài ${count('t')} · Xỉu ${count('x')} · Bộ ba ${count('b')}  |  đang ra ${name} ${run} ván liền`;
+      } else {
+        list.forEach((d) => row.appendChild(el('span', 'g-hist-chip bc', d.map((x) => ICON[BAUCUA[x]]).join(''))));
+        const tally = BAUCUA.map((id, i) => `${ICON[id]} ${list.reduce((n, d) => n + d.filter((x) => x === i).length, 0)}`);
+        info.textContent = `Số lần ra: ${tally.join(' · ')}`;
+      }
+      hist.append(head, row, info);
+      row.scrollLeft = row.scrollWidth;
+    }
+
+    // Có người đặt thắng thì bắn pháo giấy từ giữa lên cho cả phòng; mình thắng thì có thêm tiếng trúng lớn như xổ số
+    function celebrate(results, mine) {
+      if (!results.some((r) => r.net > 0)) return;
+      stops.add(confettiBurst(root, mine?.net > 0 ? 150 : 90));
+      if (mine?.net > 0) sfx.play('jackpot');
     }
 
     function buildChips(chips) {
@@ -150,6 +195,8 @@ export default {
       // Xúc xắc: có kết quả mới thì lắc một lúc rồi mới hiện
       const last = t.last;
       const key = last ? `${tab}:${last.dice.join('')}` : null;
+      if (!last) baseline = true;
+      renderHistory(t.history ?? []);
       if (!last) {
         clearInterval(rollTimer);
         diceRow.classList.remove('rolling');
@@ -157,6 +204,7 @@ export default {
         showDice(null);
         verdict.textContent = betting ? 'Đang nhận cược...' : '';
       } else if (key !== shown) {
+        const fresh = baseline; // ván này vừa ra trước mắt (không phải kết quả cũ lúc mới mở)
         shown = key;
         clearInterval(rollTimer);
         verdict.textContent = 'Đang lắc...';
@@ -171,7 +219,9 @@ export default {
           sfx.play('dieLand');
           verdict.textContent = verdictOf(last.dice);
           const mineRes = last.results.find((r) => r.name === myName());
-          if (mineRes && mineRes.net !== 0) setTimeout(() => sfx.play(mineRes.net > 0 ? 'win' : 'lose'), 300);
+          if (fresh) celebrate(last.results, mineRes);
+          if (mineRes && mineRes.net < 0) setTimeout(() => sfx.play('lose'), 300);
+          else if (mineRes && mineRes.net > 0 && !fresh) sfx.play('win');
           status.textContent = mineRes ? (mineRes.net >= 0 ? `Bạn ${mineRes.net > 0 ? 'thắng' : 'hoà'} ${mineRes.net > 0 ? '+' + mineRes.net : ''}` : `Bạn thua ${mineRes.net}`) : 'Ván đã xong';
         }, 1100);
       }
@@ -203,6 +253,8 @@ export default {
       destroy() {
         clearInterval(tickTimer);
         clearInterval(rollTimer);
+        for (const stop of stops) stop();
+        stops.clear();
       },
     };
   },

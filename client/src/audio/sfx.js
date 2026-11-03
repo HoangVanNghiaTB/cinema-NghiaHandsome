@@ -142,6 +142,14 @@ const SOUNDS = {
     tone(NOTE(76), 0.08, { type: 'triangle', vol: 0.5 });
     tone(NOTE(69), 0.18, { type: 'triangle', vol: 0.5, at: 0.07 });
   },
+  // Trúng lớn kiểu xổ số: chạy nốt lên, chuông ngân, xu rơi lấp lánh
+  jackpot: () => {
+    [72, 76, 79, 84, 88, 91, 96].forEach((n, i) => tone(NOTE(n), 0.14, { type: 'square', vol: 0.4, at: i * 0.075 }));
+    [84, 88, 91, 96].forEach((n) => tone(NOTE(n), 1.4, { type: 'sine', vol: 0.45, at: 0.55 }));
+    tone(NOTE(60), 1.2, { type: 'triangle', vol: 0.5, at: 0.55 });
+    for (let i = 0; i < 12; i++) tone(2000 + Math.random() * 1800, 0.07, { type: 'square', vol: 0.18, at: 0.7 + i * 0.1 + Math.random() * 0.05 });
+    noise(0.9, { freq: 6000, type: 'highpass', vol: 0.15, at: 0.55 });
+  },
   // Thắng / thua / hoà
   win: () => {
     [72, 76, 79, 84].forEach((n, i) => tone(NOTE(n), i === 3 ? 0.5 : 0.12, { type: 'square', vol: 0.45, at: i * 0.11 }));

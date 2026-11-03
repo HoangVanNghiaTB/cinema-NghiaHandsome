@@ -123,6 +123,15 @@
       #game .g-dice-row.rolling .g-die:nth-child(3) { animation-delay: -0.2s; }
       @keyframes die-roll { 0% { transform: translateY(0) rotate(0); } 25% { transform: translateY(-10px) rotate(14deg); } 50% { transform: translateY(0) rotate(-10deg); } 75% { transform: translateY(-6px) rotate(8deg); } 100% { transform: translateY(0) rotate(0); } }
       #game .g-dice-verdict { font-size: 17px; font-weight: bold; color: #ffd36b; margin-left: 6px; }
+      #game .g-hist { font-size: 12px; display: flex; flex-direction: column; gap: 3px; }
+      #game .g-hist-head { opacity: 0.7; }
+      #game .g-hist-row { display: flex; gap: 3px; overflow-x: auto; padding-bottom: 2px; touch-action: pan-x; }
+      #game .g-hist-chip { flex: 0 0 auto; min-width: 22px; height: 22px; padding: 0 3px; border-radius: 11px; display: inline-flex; align-items: center; justify-content: center; font-weight: bold; font-size: 12px; box-sizing: border-box; }
+      #game .g-hist-chip.tai { background: #e0412f; }
+      #game .g-hist-chip.xiu { background: #2b6cff; }
+      #game .g-hist-chip.bb { background: #c9a227; color: #222; }
+      #game .g-hist-chip.bc { background: #1d212a; border: 1px solid #3a4050; font-weight: normal; padding: 0 6px; }
+      #game .g-hist-info { opacity: 0.85; }
       #game .g-spots { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
       #game .g-spots.six { grid-template-columns: repeat(3, 1fr); grid-template-rows: 1fr 1fr; }
       #game .g-spot { color: #fff; border: 2px solid rgba(255,255,255,0.25); border-radius: 10px; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 4px; font-size: 13px; }
@@ -264,6 +273,10 @@
       #guide .pane.on { display: block; }
       #guide .row { display: grid; grid-template-columns: minmax(110px, 190px) 1fr; gap: 6px 12px; padding: 6px 4px; border-bottom: 1px solid #232733; font-size: 14px; }
       #guide .row b { color: #6bd1ff; font-weight: 600; }
+      #guide .tips { margin: 10px 4px 0; padding: 8px 12px; background: #1d212a; border-radius: 8px; font-size: 13px; }
+      #guide .tips b:first-child { color: #ffd36b; }
+      #guide .tips ul { margin: 6px 0 0; padding-left: 18px; }
+      #guide .tips li { margin: 3px 0; }
       #guide .note { font-size: 13px; opacity: 0.75; padding: 8px 4px; }
       #guide #guide-go { font-size: 17px; padding: 10px 34px; cursor: pointer; background: #0a8a4a; color: #fff; border: 0; border-radius: 8px; }
 
@@ -427,6 +440,17 @@
           <div class="row"><b>Mic, Chat</b><span>Bật / tắt mic (mặc định tắt, cần cho phép micro); nhắn tin chữ cho cả phòng.</span></div>
           <div class="row"><b>Hàng nút trên cùng</b><span>&#9776; Menu, &#128247; đổi góc nhìn, &#128176; ví điểm, &#128266; chỉnh âm thanh, &#127918; ẩn / hiện phím ảo.</span></div>
           <div class="row"><b>Trong game</b><span>Chạm vào bàn để chơi. Nút Đóng ở góc trên để thoát; trong Ma Sói có nút mic và nút bật / tắt giọng đọc.</span></div>
+        </div>
+        <div class="tips">
+          <b>Lưu ý</b>
+          <ul>
+            <li>Phải <b>đứng gần</b> người khác mới nghe được tiếng mic của họ (xa quá thì im). Người đang hát karaoke thì cả phòng nghe.</li>
+            <li>Mic mặc định tắt: bấm M (hoặc nút Mic) và <b>cho phép micro</b> khi trình duyệt hỏi. Nên dùng tai nghe để khỏi vọng tiếng.</li>
+            <li>Laptop nên dùng trình duyệt khác Chrome (Edge, Firefox, Cốc Cốc...).</li>
+            <li>Điện thoại: cầm ngang, bật tiếng (iPhone gạt công tắc chuông về chế độ có tiếng) mới nghe được giọng và hiệu ứng.</li>
+            <li>Hai người ở mạng khác nhau (4G, wifi công ty) đôi khi không nghe được nhau: thử đổi mạng.</li>
+            <li>Phòng trống một lúc là điểm và dữ liệu game bị xóa. Ma Sói cần từ 5 người ngồi, mỗi ván 100 điểm.</li>
+          </ul>
         </div>
         <div class="note">Mỗi phòng tối đa 10 người. Điểm của bạn dùng chung cho mọi game, hát karaoke và mua phụ kiện. Xem lại hướng dẫn này bằng cách tải lại trang.</div>
       </div>

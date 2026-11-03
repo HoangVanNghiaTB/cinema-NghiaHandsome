@@ -553,6 +553,8 @@ function makeVote(players, { reward }) {
 // ----- Bầu cua / Tài xỉu: cả phòng cược bằng điểm chung của rạp (xem wallet.js), server lắc 3 xúc xắc -----
 const DICE_BET_MS = 20000;
 const DICE_CHIPS = [10, 50, 100];
+const DICE_HISTORY_KEEP = 100; // số ván nhớ trong phiên
+const DICE_HISTORY_SHOW = 30; // số ván gửi cho client để soi cầu
 const BAUCUA = ['nai', 'bau', 'ga', 'ca', 'cua', 'tom']; // mặt xúc xắc 0..5
 const DICE_TABLES = {
   taixiu: { spots: ['xiu', 'tai'], label: 'Tài xỉu' },
@@ -578,7 +580,7 @@ function dicePayout(table, dice, bets) {
 
 function makeDice({ onChange, players, wallet }) {
   const tables = {};
-  for (const t of Object.keys(DICE_TABLES)) tables[t] = { phase: 'idle', endsAt: 0, bets: new Map(), last: null, timer: null };
+  for (const t of Object.keys(DICE_TABLES)) tables[t] = { phase: 'idle', endsAt: 0, bets: new Map(), last: null, history: [], timer: null }; // history: các ván đã ra của phiên này (soi cầu), xoá cùng game khi phòng trống quá lâu
   const sumOf = (spots) => Object.values(spots).reduce((a, b) => a + b, 0);
 
   function roll(name) {
@@ -594,6 +596,8 @@ function makeDice({ onChange, players, wallet }) {
       results.push({ name: pname, net });
     }
     t.last = { dice, results: results.sort((a, b) => b.net - a.net) };
+    t.history.push(dice);
+    if (t.history.length > DICE_HISTORY_KEEP) t.history.shift();
     onChange();
   }
 
@@ -606,6 +610,7 @@ function makeDice({ onChange, players, wallet }) {
         msLeft: t.phase === 'betting' ? Math.max(0, t.endsAt - Date.now()) : 0,
         bets: Object.fromEntries([...t.bets].map(([id, b]) => [id, b.spots])),
         last: t.last,
+        history: t.history.slice(-DICE_HISTORY_SHOW), // cũ trước, mới sau
       }])),
     }),
     brief() {

@@ -110,3 +110,60 @@ export function duelSfx(prev, next, mine, onMove, delay = 0) {
     later('turn');
   }
 }
+
+// Pháo giấy bắn từ giữa khung lên trên rồi rơi xuống mờ dần (vẽ trên một canvas phủ lên `root`, tự gỡ khi xong).
+// Trả về hàm dừng sớm (dùng khi đóng game).
+export function confettiBurst(root, count = 110) {
+  const w = root.clientWidth || 300;
+  const h = root.clientHeight || 300;
+  const dpr = Math.min(2, devicePixelRatio || 1);
+  const c = document.createElement('canvas');
+  c.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:5';
+  c.width = Math.floor(w * dpr);
+  c.height = Math.floor(h * dpr);
+  root.appendChild(c);
+  const g = c.getContext('2d');
+  g.scale(dpr, dpr);
+  const COLORS = ['#ff4d4d', '#ffd24d', '#4dd2ff', '#7dff7d', '#ff7de9', '#ffffff', '#ffa94d'];
+  const parts = Array.from({ length: count }, () => {
+    const a = -Math.PI / 2 + (Math.random() - 0.5) * 1.5; // hướng lên, toả ra hai bên
+    const sp = h * (0.7 + Math.random() * 1.1); // px/giây
+    return {
+      x: w / 2, y: h * 0.55, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+      rot: Math.random() * 6.28, vr: (Math.random() - 0.5) * 14,
+      size: 5 + Math.random() * 6, color: COLORS[Math.floor(Math.random() * COLORS.length)],
+    };
+  });
+  const TOTAL = 3;
+  const start = performance.now();
+  let last = start;
+  let raf = 0;
+  const stop = () => {
+    cancelAnimationFrame(raf);
+    c.remove();
+  };
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    const t = (now - start) / 1000;
+    if (t > TOTAL) return stop();
+    g.clearRect(0, 0, w, h);
+    g.globalAlpha = t > TOTAL - 0.8 ? Math.max(0, (TOTAL - t) / 0.8) : 1;
+    for (const p of parts) {
+      p.vy += h * 1.5 * dt; // trọng lực
+      p.vx *= 0.995;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rot += p.vr * dt;
+      g.save();
+      g.translate(p.x, p.y);
+      g.rotate(p.rot);
+      g.fillStyle = p.color;
+      g.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      g.restore();
+    }
+    raf = requestAnimationFrame(frame);
+  }
+  raf = requestAnimationFrame(frame);
+  return stop;
+}

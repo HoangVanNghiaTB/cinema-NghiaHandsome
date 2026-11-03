@@ -200,7 +200,7 @@ cinema-3d/
 | **Nối 4** (7×6) | Như Caro, quân rơi từ trên xuống rồi nảy nhẹ. |
 | **Đập chuột** | Cả phòng đua 30 giây, chuột nào ai bấm trước ăn điểm (🐹 +1, 🌟 +3, 💣 −2). Thưởng điểm rạp theo điểm ván. |
 | **Rắn săn mồi, 2048** | Chơi ở máy mình, điểm cao lên bảng kỷ lục chung; thưởng điểm rạp, cách nhau tối thiểu 20 giây. |
-| **Bầu cua / Tài xỉu** | Cả phòng cược bằng điểm chung trong 20 giây, server lắc xúc xắc. |
+| **Bầu cua / Tài xỉu** | Cả phòng cược bằng điểm chung trong 20 giây, server lắc xúc xắc. Ván nào có người đặt thắng thì **pháo giấy bắn từ giữa bảng lên** cho cả phòng đang mở game, người thắng còn nghe tiếng trúng lớn kiểu xổ số. Có **soi cầu**: dãy các ván đã ra trong phiên (Tài xỉu: tổng điểm, đỏ Tài, xanh Xỉu, vàng bộ ba, kèm số lần và cầu đang bệt; Bầu cua: ba linh vật mỗi ván và số lần ra của từng linh vật), nhớ tối đa 100 ván. Lịch sử nằm trong RAM, **xóa cùng dữ liệu phòng khi phòng trống quá thời gian dọn** (mục 5.12). |
 | **Bình chọn phim** | Dán link YouTube đề xuất, mỗi người một phiếu, bấm Chiếu thì chiếu cho cả phòng. |
 | **Ma Sói** | Mục 5.15. |
 

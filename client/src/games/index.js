@@ -1,3 +1,4 @@
+import { sfx } from '../audio/sfx.js';
 import caro from './caro.js';
 import whack from './whack.js';
 import snake from './snake.js';
@@ -21,6 +22,10 @@ const GAMES = { caro, whack, snake, g2048, dice, connect4, vote, wallet, werewol
 //   me()       { id, name } của người chơi này
 export function createGameHost({ overlay, titleEl, bodyEl, net, me, isTouch, onClose, requestClose, wallet: getWallet, extra = {} }) {
   let current = null; // { id, inst }
+  // Mọi nút bấm trong cửa sổ game đều có tiếng click (ô đập chuột có tiếng riêng)
+  bodyEl.addEventListener('click', (e) => {
+    if (e.target.closest('button:not(.g-hole)')) sfx.play('click');
+  });
 
   function open(id) {
     const def = GAMES[id];
@@ -30,6 +35,7 @@ export function createGameHost({ overlay, titleEl, bodyEl, net, me, isTouch, onC
     overlay.style.display = 'flex';
     const ctx = { send: (data) => net()?.gameAct(id, data), me, isTouch, playVideo: (videoId) => net()?.loadVideo(videoId), close: requestClose, wallet: getWallet, ...extra };
     current = { id, def, inst: def.mount(bodyEl, ctx) };
+    sfx.play('open');
     if (!def.local) net().gameOpen(id);
     return true;
   }
@@ -39,6 +45,7 @@ export function createGameHost({ overlay, titleEl, bodyEl, net, me, isTouch, onC
     const { id, def, inst } = current;
     current = null;
     inst.destroy?.();
+    sfx.play('close');
     if (!def.local) net()?.gameClose(id);
     overlay.style.display = 'none';
     bodyEl.replaceChildren();

@@ -1,4 +1,5 @@
 import { el, watchSize } from './util.js';
+import { sfx } from '../audio/sfx.js';
 import { ROLES, FACTION_NAMES } from './werewolf/roles.js';
 import { clipUrl, CLIP_TEXT } from './werewolf/narration.js';
 import { FRUITS } from '../scene/looks.js';
@@ -128,6 +129,7 @@ export default {
     let chatDraft = '';
     let logEl = null; // khung chat đang hiện (để cập nhật tin mới mà không dựng lại cả cửa sổ lúc đang gõ)
     let timerEl = null;
+    sfx.preload(['hang', 'gunshot', 'howl', 'laugh', 'ambNight', 'ambDay']);
     let cardFace = true; // thẻ bài đang ngửa hay úp (bấm vào thẻ để úp lại, tránh người bên cạnh nhìn trộm)
     let dealtKey = '';
     let compact = false; // màn hình nhỏ (điện thoại): thu gọn bàn, ghế, thẻ bài cho vừa
@@ -234,8 +236,14 @@ export default {
     function tick() {
       if (!s || !timerEl) return;
       const d = s.me?.prompt?.deadline ?? (['countdown', 'day', 'vote', 'hunter', 'ended'].includes(s.phase) ? s.deadline : 0);
-      timerEl.textContent = d ? `${secLeft(d)}s` : '';
+      const left = d ? secLeft(d) : 0;
+      timerEl.textContent = d ? `${left}s` : '';
+      // 5 giây cuối khi mình phải chọn / đang bỏ phiếu, 3 giây cuối trước khi ván bắt đầu: mỗi giây một tiếng tích
+      const hurry = s.phase === 'countdown' ? left <= 3 : (s.phase === 'vote' || s.phase === 'hunter' || (s.me?.prompt && !s.me.prompt.done)) && left <= 5;
+      if (hurry && left > 0 && left !== lastTick) sfx.play('tick');
+      lastTick = left;
     }
+    let lastTick = -1;
     const timerId = setInterval(tick, 250);
 
     // ----- bàn tròn -----
@@ -330,6 +338,7 @@ export default {
           if (selectable) {
             a.classList.add('pick');
             a.addEventListener('click', () => {
+              sfx.play(prompt.kind === 'pick1' && (s.phase === 'vote' || prompt.key === 'vote') ? 'vote' : 'select');
               if (prompt.kind === 'pick1') {
                 picked = [p.idx];
                 send({ op: 'act', value: p.idx });
@@ -374,6 +383,7 @@ export default {
       card.append(face, el('div', 'ww-back', '🐺'));
       wrapEl.appendChild(card);
       wrapEl.addEventListener('click', () => {
+        sfx.play('flip');
         cardFace = !cardFace;
         card.classList.toggle('face', cardFace);
       });
@@ -572,6 +582,18 @@ export default {
         const typing = document.activeElement?.tagName === 'INPUT' && root.contains(document.activeElement);
         const samePrompt = s?.me?.prompt?.text === next.me?.prompt?.text;
         const prevPhase = s?.phase;
+        // người vừa chết: bị treo cổ (sau bỏ phiếu) -> tiếng treo cổ; Thợ Săn bắn -> tiếng súng; chết đêm -> chuông trầm
+        if (s && s.phase !== 'ended') {
+          const was = new Map(s.players.map((p) => [p.idx, p.alive]));
+          if (next.players.some((p) => was.get(p.idx) && !p.alive)) sfx.play(s.phase === 'vote' ? 'hang' : s.phase === 'hunter' ? 'gunshot' : 'death');
+        }
+        // tiếng nền: dế kêu ban đêm, họa mi ban ngày; ngoài ván thì tắt
+        sfx.ambient(next.phase === 'night' ? 'ambNight' : ['day', 'vote', 'hunter'].includes(next.phase) ? 'ambDay' : null);
+        if (s && s.phase !== 'ended' && next.phase === 'ended' && next.result?.winner) {
+          const mine = next.result.payouts.find((p) => p.name === ctx.me().name);
+          if (mine) setTimeout(() => sfx.play(mine.delta > 0 ? 'win' : 'lose'), 600);
+        }
+        if (s && s.phase === 'lobby' && next.phase === 'countdown') sfx.play('go');
         s = next;
         offset = Date.now() - next.now;
         applyMic(next);
@@ -584,6 +606,8 @@ export default {
       },
       cue(d) {
         playCue(d.clip);
+        if (d.clip === 'night_start') sfx.play('howl'); // sói hú khi trời tối
+        else if (d.clip === 'witch_sleep') sfx.play('laugh'); // Phù Thủy cười khi nhắm mắt
       },
       destroy() {
         stopWatch();
@@ -592,6 +616,7 @@ export default {
         document.removeEventListener('pointerup', onTouch, true);
         document.removeEventListener('click', onTouch, true);
         stopVoice();
+        sfx.ambient(null);
         ctx.mic?.lock(false); // đóng cửa sổ thì trả mic về như cũ
       },
     };

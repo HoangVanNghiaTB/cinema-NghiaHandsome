@@ -1,4 +1,5 @@
-import { el, watchSize, createStakeBar } from './util.js';
+import { el, watchSize, createStakeBar, duelSfx } from './util.js';
+import { sfx } from '../audio/sfx.js';
 
 // Cờ Caro 13x13, 5 quân liền hàng thắng. Hai người ngồi hai phía, người khác xem. Luật chơi nằm ở server/games.js.
 export default {
@@ -134,6 +135,7 @@ export default {
     layout();
     return {
       state(next) {
+        duelSfx(s, next, next.seats.X?.id === ctx.me().id ? 'X' : next.seats.O?.id === ctx.me().id ? 'O' : null, () => sfx.play('place'), 140);
         s = next;
         refresh();
       },

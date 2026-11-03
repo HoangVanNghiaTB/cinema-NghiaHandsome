@@ -1,4 +1,5 @@
 import { mapDelta } from '../ui/viewport.js';
+import { sfx } from '../audio/sfx.js';
 import { DUEL_STAKES } from '../economy.js';
 
 // Đồ dùng chung của các game treo tường
@@ -92,4 +93,20 @@ export function createStakeBar(ctx) {
       for (const [n, b] of buttons) b.style.outline = n === s.stake ? '2px solid #ffd36b' : '';
     },
   };
+}
+
+// Tiếng cho game đấu 2 người (Caro, Nối 4) mỗi khi server gửi trạng thái mới:
+// có quân mới -> tiếng quân; tới lượt mình -> ting; ván xong -> thắng / thua / hoà (người xem chỉ nghe tiếng quân).
+//   mine: 'X'/'O'/'R'/'Y' hoặc null; onMove(): phát tiếng quân; delay: ms chờ quân rơi xong mới phát tiếng kết quả
+export function duelSfx(prev, next, mine, onMove, delay = 0) {
+  if (!prev) return;
+  const count = (st) => st.board.split('').filter((c) => c !== '.').length;
+  const moved = count(next) === count(prev) + 1;
+  if (moved) onMove();
+  const later = (name) => setTimeout(() => sfx.play(name), delay);
+  if (!prev.winner && next.winner) {
+    if (mine) later(next.winner === 'draw' ? 'draw' : next.winner === mine ? 'win' : 'lose');
+  } else if (moved && !next.winner && mine && next.turn === mine) {
+    later('turn');
+  }
 }

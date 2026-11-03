@@ -1,4 +1,5 @@
 import { el } from './util.js';
+import { sfx } from '../audio/sfx.js';
 
 // Bầu cua + Tài xỉu chung một tranh (hai tab). Cả phòng đặt cược bằng điểm chung của rạp trong 20 giây, server lắc xúc xắc (server/games.js).
 // Tài xỉu: tổng 3 xúc xắc 11-17 là Tài, 4-10 là Xỉu, đặt đúng thì ăn gấp đôi; bộ ba thì nhà cái ăn hết.
@@ -68,9 +69,13 @@ export default {
       const t = s?.tables[tab];
       return t?.phase === 'betting' ? Math.max(0, Math.ceil((t.msLeft - (performance.now() - receivedAt)) / 1000)) : 0;
     };
+    let lastSecond = -1;
     const tickTimer = setInterval(() => {
       const t = s?.tables[tab];
-      timer.textContent = t?.phase === 'betting' ? String(secsLeft()) : '--';
+      const left = t?.phase === 'betting' ? secsLeft() : -1;
+      timer.textContent = left >= 0 ? String(left) : '--';
+      if (left > 0 && left <= 5 && left !== lastSecond) sfx.play('tick'); // 5 giây cuối cược
+      lastSecond = left;
     }, 250);
 
     // Vẽ một mặt xúc xắc: Tài xỉu là mặt chấm (1..6), Bầu cua là mặt linh vật; d = 0..5, null = chưa lắc
@@ -155,6 +160,7 @@ export default {
         shown = key;
         clearInterval(rollTimer);
         verdict.textContent = 'Đang lắc...';
+        sfx.play('shake');
         diceRow.classList.add('rolling'); // xúc xắc nảy và xoay trong lúc đổi mặt liên tục
         rollTimer = setInterval(() => showDice([0, 1, 2].map(() => Math.floor(Math.random() * 6))), 90);
         setTimeout(() => {
@@ -162,8 +168,10 @@ export default {
           diceRow.classList.remove('rolling');
           if (shown !== key) return;
           showDice(last.dice);
+          sfx.play('dieLand');
           verdict.textContent = verdictOf(last.dice);
           const mineRes = last.results.find((r) => r.name === myName());
+          if (mineRes && mineRes.net !== 0) setTimeout(() => sfx.play(mineRes.net > 0 ? 'win' : 'lose'), 300);
           status.textContent = mineRes ? (mineRes.net >= 0 ? `Bạn ${mineRes.net > 0 ? 'thắng' : 'hoà'} ${mineRes.net > 0 ? '+' + mineRes.net : ''}` : `Bạn thua ${mineRes.net}`) : 'Ván đã xong';
         }, 1100);
       }

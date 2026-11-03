@@ -12,6 +12,7 @@ import { Confetti } from './scene/confetti.js';
 import { FirstPersonHand } from './scene/fpHand.js';
 import { AvatarHands } from './scene/avatarHands.js';
 import { createSounds, STEP_LENGTH } from './audio/sounds.js';
+import { sfx } from './audio/sfx.js';
 import { createYouTubePlayer, parseVideoId } from './player/youtube.js';
 import { Avatars } from './scene/avatars.js';
 import { Trash } from './scene/trash.js';
@@ -124,6 +125,7 @@ try {
   // không đọc được thì dùng mặc định
 }
 sounds.setVolume(volumes.effects / 100);
+sfx.setVolume(volumes.effects / 100);
 
 // Chọn chất lượng đồ hoạ trong menu; đổi thì tải lại trang để áp dụng
 const qualitySelect = $('quality');
@@ -149,7 +151,10 @@ for (const key of Object.keys(volumes)) {
     volumes[key] = Number(slider.value);
     label.textContent = `${volumes[key]}%`;
     if (key === 'video') applyVideoVolume();
-    if (key === 'effects') sounds.setVolume(volumes.effects / 100);
+    if (key === 'effects') {
+      sounds.setVolume(volumes.effects / 100);
+      sfx.setVolume(volumes.effects / 100);
+    }
     try {
       localStorage.setItem(VOLUMES_KEY, JSON.stringify(volumes));
     } catch {
@@ -428,6 +433,7 @@ function setWallet(w) {
   $('points-n').textContent = String(wallet.pts);
   refreshLookOptions();
   gameHost.onWallet();
+  if (w.reason && w.delta) sfx.play(w.delta > 0 ? 'coin' : 'coinLoss');
   if (w.reason && w.delta) showToast(`${w.delta > 0 ? '+' : ''}${w.delta} điểm · ${w.reason}`, w.delta > 0 ? 'plus' : 'minus');
 }
 
@@ -1439,6 +1445,7 @@ function setActive(active) {
 
 $('enter').addEventListener('click', () => {
   sounds.unlock(); // trình duyệt chỉ cho phát âm thanh sau một thao tác bấm
+  sfx.unlock();
   if (isTouch) {
     setActive(true);
     // Toàn màn hình cho rộng chỗ. Không khoá hướng màn hình: trang tự xoay ngang bằng CSS (xem index.html),

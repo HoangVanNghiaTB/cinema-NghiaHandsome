@@ -1,4 +1,5 @@
 import { el, onDirKeys, onSwipe, renderTop, watchSize } from './util.js';
+import { sfx } from '../audio/sfx.js';
 
 // Rắn săn mồi: chơi một mình ở máy bạn, điểm cao lên bảng kỷ lục chung. Phím mũi tên / WASD, hoặc vuốt trên điện thoại.
 const COLS = 20;
@@ -37,6 +38,7 @@ export default {
       alive = true;
       placeFood();
       scoreEl.textContent = '0';
+      sfx.play('go');
       status.textContent = 'Ăn táo, đừng đâm tường!';
       startBtn.style.display = 'none';
       schedule();
@@ -48,6 +50,7 @@ export default {
     }
     function over() {
       alive = false;
+      sfx.play('die');
       status.textContent = `Thua rồi! ${score} điểm. Nhấn Space để chơi lại`;
       startBtn.textContent = 'Chơi lại';
       startBtn.style.display = '';
@@ -65,6 +68,7 @@ export default {
       snake.unshift(head);
       if (head.x === food.x && head.y === food.y) {
         score++;
+        sfx.play('eat');
         scoreEl.textContent = String(score);
         placeFood();
       } else {

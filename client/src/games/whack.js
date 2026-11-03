@@ -1,4 +1,5 @@
 import { el, renderTop, watchSize } from './util.js';
+import { sfx } from '../audio/sfx.js';
 
 // Đập chuột đua nhau: mỗi ván 30 giây, chuột nào ai ấn trước người đó ăn điểm. 🐹 +1, 🌟 +3, 💣 -2 (xem server/games.js)
 const MOLE_ICON = { n: '🐹', g: '🌟', b: '💣' };
@@ -8,6 +9,7 @@ export default {
   title: 'Đập chuột',
   mount(root, ctx) {
     const wrap = el('div', 'g-split');
+    sfx.preload(['bonk']);
     const grid = el('div', 'g-whack');
     const holes = [];
     for (let i = 0; i < 9; i++) {
@@ -15,7 +17,11 @@ export default {
       h.addEventListener('pointerdown', (e) => {
         e.preventDefault();
         const id = Number(h.dataset.mole);
-        if (!id) return;
+        if (!id) {
+          if (s?.phase === 'playing') sfx.play('miss'); // đập vào ô trống
+          return;
+        }
+        sfx.play(h.dataset.kind === 'g' ? 'gold' : h.dataset.kind === 'b' ? 'bomb' : 'bonk');
         h.dataset.mole = '';
         h.textContent = '';
         ctx.send({ op: 'hit', id });
@@ -43,8 +49,13 @@ export default {
       grid.style.fontSize = `${size / 6}px`;
     }
     const secsLeft = () => (s?.phase === 'playing' ? Math.max(0, Math.ceil((s.msLeft - (performance.now() - receivedAt)) / 1000)) : 0);
+    let lastSecond = -1;
     const tickTimer = setInterval(() => {
-      timer.textContent = String(s?.phase === 'playing' ? secsLeft() : 30);
+      const left = s?.phase === 'playing' ? secsLeft() : 30;
+      timer.textContent = String(left);
+      // 5 giây cuối mỗi giây một tiếng tích
+      if (s?.phase === 'playing' && left <= 5 && left > 0 && left !== lastSecond) sfx.play('tick');
+      lastSecond = left;
     }, 200);
 
     function refresh() {
@@ -52,6 +63,7 @@ export default {
       holes.forEach((h, i) => {
         const m = moleAt.get(i);
         h.dataset.mole = m ? m.id : '';
+        h.dataset.kind = m ? m.kind : '';
         h.textContent = m ? MOLE_ICON[m.kind] : '';
         h.classList.toggle('gold', m?.kind === 'g');
       });
@@ -74,6 +86,12 @@ export default {
     layout();
     return {
       state(next) {
+        // bắt đầu ván -> tiếng go; hết ván -> chuông, và fanfare nếu mình thắng
+        if (s && s.phase !== 'playing' && next.phase === 'playing') sfx.play('go');
+        if (s && s.phase === 'playing' && next.phase === 'result') {
+          sfx.play('bell');
+          if (next.winner?.id === ctx.me().id) setTimeout(() => sfx.play('win'), 500);
+        }
         s = next;
         receivedAt = performance.now();
         refresh();

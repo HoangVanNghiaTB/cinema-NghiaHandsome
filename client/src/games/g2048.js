@@ -1,4 +1,5 @@
 import { el, onDirKeys, onSwipe, renderTop, watchSize } from './util.js';
+import { sfx } from '../audio/sfx.js';
 
 // 2048: chơi một mình, điểm lên bảng kỷ lục chung. Mũi tên / WASD hoặc vuốt.
 const N = 4;
@@ -93,12 +94,20 @@ export default {
       return moved;
     }
     function move(d) {
-      if (over || !slide(d)) return;
+      if (over) return;
+      const before = score;
+      const had2048 = cells.includes(2048);
+      if (!slide(d)) return;
+      // gộp ô: nốt càng cao khi gộp ra ô càng lớn; không gộp được gì thì chỉ có tiếng trượt
+      if (score > before) sfx.play('merge', Math.round(Math.log2(Math.max(4, score - before))) - 1);
+      else sfx.play('slide');
       spawn();
+      if (!had2048 && cells.includes(2048)) setTimeout(() => sfx.play('win'), 150);
       if (!canMove()) {
         over = true;
         status.textContent = `Hết nước đi! ${score} điểm`;
         submit();
+        setTimeout(() => sfx.play('lose'), 250);
       }
       render();
     }

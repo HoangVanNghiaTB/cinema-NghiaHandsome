@@ -1,4 +1,5 @@
-import { el, watchSize, createStakeBar } from './util.js';
+import { el, watchSize, createStakeBar, duelSfx } from './util.js';
+import { sfx } from '../audio/sfx.js';
 
 // Nối 4: 7 cột x 6 hàng, hai người (đỏ / vàng) thả quân vào cột, 4 quân liền hàng thắng. Luật nằm ở server/games.js.
 const COLOR = { R: '#d93636', Y: '#f5d020' };
@@ -154,6 +155,18 @@ export default {
     return {
       state(next) {
         const count = (st) => (st ? st.board.split('').filter((c) => c !== '.').length : 0);
+        // Tiếng quân: xì khi thả, cộc khi chạm đáy; tiếng thắng / thua / lượt chờ quân rơi xong
+        const fallMs = FALL_BASE_MS + FALL_PER_ROW_MS * Math.floor(Math.max(0, next.last) / COLS);
+        duelSfx(
+          s,
+          next,
+          next.seats.R?.id === ctx.me().id ? 'R' : next.seats.Y?.id === ctx.me().id ? 'Y' : null,
+          () => {
+            sfx.play('drop');
+            setTimeout(() => sfx.play('land'), fallMs);
+          },
+          fallMs + 150,
+        );
         // Có đúng một quân mới so với trạng thái trước thì cho quân đó rơi từ trên xuống
         if (s && next.last >= 0 && count(next) === count(s) + 1) {
           const row = Math.floor(next.last / COLS);

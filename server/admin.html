@@ -235,6 +235,15 @@ function renderWerewolf() {
   );
 }
 
+// Ai đang online: tóm tắt ngay đầu trang (chi tiết và nút chỉnh điểm nằm ở thẻ từng phòng bên dưới)
+function renderWho() {
+  return h('div', { class: 'card' }, h('h2', {}, 'Ai đang online'),
+    state.rooms.map((r) => h('div', { class: 'row', style: 'margin:4px 0' },
+      h('b', { style: 'min-width:150px' }, r.name + ' (' + r.players.length + '/' + r.max + ')'),
+      r.players.length ? h('span', {}, r.players.map((p) => p.name + ' · ' + p.pts + ' điểm').join('   |   ')) : h('span', { class: 'dim' }, 'trống'))),
+    h('div', { class: 'dim' }, 'Muốn chỉnh điểm, khoá chat, đá hay cấm: xuống thẻ của phòng đó bên dưới.'));
+}
+
 function renderNotice() {
   const text = h('input', { placeholder: 'Nội dung thông báo...', style: 'flex:1;min-width:180px', maxLength: 200 });
   const sel = h('select', { style: 'background:#0e1016;color:inherit;border:1px solid var(--line);border-radius:6px;padding:5px' },
@@ -317,7 +326,7 @@ function render() {
   // Đang gõ vào ô nào thì không vẽ lại, tránh mất chữ đang nhập
   if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
   $('updated').textContent = 'cập nhật ' + fmtTime(state.now);
-  $('content').replaceChildren(renderServer(), renderGeneral(), renderWerewolf(), renderNotice(), state.rooms.map(renderRoom), renderBans(), renderLog());
+  $('content').replaceChildren(renderServer(), renderWho(), renderGeneral(), renderWerewolf(), renderNotice(), state.rooms.map(renderRoom), renderBans(), renderLog());
 }
 
 async function refresh() {

@@ -1,6 +1,6 @@
 import { el } from './util.js';
 import { ITEM_PRICES, LOOK_OPTIONS, LOOK_LABELS, itemKey } from '../scene/looks.js';
-import { TIP_AMOUNTS, EARN_RULES, SING_COST } from '../economy.js';
+import { TIP_AMOUNTS, EARN_RULES, econ } from '../economy.js';
 
 // Ví điểm (mở bằng phím P, hoặc nút 💰 cạnh nút ẩn/hiện phím ảo trên điện thoại): tặng điểm cho người khác, mua phụ kiện, xem cách kiếm điểm.
 // Không phải game nên không có phòng riêng ở server (local: true); điểm và phụ kiện đã mua lấy từ ctx.wallet().
@@ -72,7 +72,7 @@ export default {
     }
 
     function renderEarn() {
-      body.appendChild(el('div', 'g-dim', `Mọi người vào rạp đều có sẵn điểm. Vào hát karaoke tốn ${SING_COST} điểm mỗi lần.`));
+      body.appendChild(el('div', 'g-dim', `Mọi người vào rạp đều có sẵn điểm. Vào hát karaoke tốn ${econ.singCost} điểm mỗi lần.`));
       for (const [game, rule] of EARN_RULES) {
         const row = el('div', 'g-earn-row');
         row.append(el('b', '', game), el('span', '', rule));

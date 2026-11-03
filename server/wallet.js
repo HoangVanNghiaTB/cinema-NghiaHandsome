@@ -7,7 +7,7 @@ export function createWallet(io, players, startPts) {
   let accounts = new Map(); // cid -> { pts, owned: Set<itemKey> }
   const account = (cid) => {
     let a = accounts.get(cid);
-    if (!a) accounts.set(cid, (a = { pts: startPts(), owned: new Set() }));
+    if (!a) accounts.set(cid, (a = { pts: startPts(), owned: new Set(), name: '', seenAt: 0 }));
     return a;
   };
   const snapshot = (cid) => {
@@ -23,6 +23,13 @@ export function createWallet(io, players, startPts) {
 
   return {
     snapshot,
+    // Ghi nhớ tên và lần cuối thấy tài khoản (để trang admin vẫn thấy người đã rời phòng mà còn điểm)
+    touch(cid, name) {
+      const a = account(cid);
+      if (name) a.name = name;
+      a.seenAt = Date.now();
+    },
+    list: () => [...accounts].map(([cid, a]) => ({ cid, name: a.name, pts: a.pts, seenAt: a.seenAt })),
     pts: (cid) => account(cid).pts,
     ownedSet: (cid) => account(cid).owned,
     notify,

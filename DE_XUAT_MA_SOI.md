@@ -1,6 +1,25 @@
 # Đề xuất: thêm game Ma Sói vào rạp
 
-Tài liệu để hai bên cùng bàn và chốt trước khi làm. Mục 2 liệt kê những gì đã chốt. Mục còn lại là đề xuất của mình, kèm lý do.
+Tài liệu đề xuất ban đầu để hai bên cùng bàn và chốt trước khi làm. Mục 2 liệt kê những gì đã chốt. Mục còn lại là đề xuất của mình, kèm lý do.
+
+> **Game đã được làm xong và đang chạy.** Phần "Hiện trạng" ngay dưới đây ghi những chỗ **khác hoặc thêm so với đề xuất**; các mục từ 1 đến 10 giữ nguyên làm lý do thiết kế. Hệ thống tổng thể xem [DESIGN.md](DESIGN.md) mục 5.15, lời quản trò xem [KICH_BAN_QUAN_TRO.md](KICH_BAN_QUAN_TRO.md).
+
+## Hiện trạng (đã làm)
+
+Mọi chỗ trong tài liệu này không nhắc ở đây thì đúng như đã đề xuất. Những chỗ khác hoặc thêm:
+
+- **Thông số chỉnh được ở trang admin**: phí, lãi từng phe, số người tối thiểu / tối đa, đếm ngược, các thời gian (thảo luận, bỏ phiếu, Thợ Săn, xem kết quả, thao tác từng vai ban đêm...). Danh sách vai, điểm vai, luật vai, điều kiện thắng và khoảng cân bằng đội hình thì không chỉnh được. Chỉnh xong áp dụng từ ván sau và mất khi server khởi động lại. Các con số "khoảng" ở dưới (120 giây, 15 giây...) là mặc định.
+- **Thời gian mặc định**: thảo luận 120 giây, **sau 60 giây hiện nút "Bỏ qua thảo luận"** (tất cả người còn sống bấm thì sang bỏ phiếu sớm), bỏ phiếu 30 giây (xong sớm nếu mọi người đã bỏ), Thợ Săn chọn người bắn 15 giây, xem kết quả 25 giây rồi tự về bàn chờ, đóng cửa sổ giữa ván được 60 giây để quay lại.
+- **Ban đêm do quản trò gọi từng vai** bằng giọng đọc thu sẵn, **chỉ gọi những vai có trong ván**. Mỗi lời gọi chỉ **chọn một lần** (ấn nhầm là mất lượt, giao diện có ghi chú nhắc), người của vai đó chọn xong thì sang vai kế tiếp thay vì chờ hết giờ. Vai đã chia mà người giữ đã chết vẫn được gọi và chờ **10 giây** để không lộ. Bảo Vệ được gọi **trước** bầy Sói.
+- **Sói Đầu Đàn** được biến người bị cắn thành Sói từ đêm 2, một lần, **chỉ khi** Bảo Vệ không che người đó và sau khi biến thì số Sói vẫn ít hơn số người còn lại (nếu không thì lời gọi bị bỏ qua).
+- **Ván huỷ** khi còn dưới **3 người thật**; lúc đó hoàn phí cho người còn lại.
+- **Phe thứ ba tính lãi riêng**: Chán Đời và Sói Trắng mỗi bên có mức lãi chỉnh được (mặc định 100). Tiền thắng thua chia khi ván kết thúc rồi mới lật bài; phe thắng hiện to giữa bàn.
+- **Mic và chat đúng như đề xuất, thêm một ngoại lệ**: Thợ Săn đã chết vẫn dùng được mic và chat trong 15 giây chọn người bắn, bắn xong mới bị tắt. Việc tắt mic chỉ ép được phía trình duyệt người chơi. Chat chung của rạp bị ẩn trên máy tính khi đang mở game (khỏi chồng lên cửa sổ game).
+- **Thị Trưởng** và người bị biến thành Sói: biểu tượng thị trưởng giữ nguyên sau khi bị biến, không bị lộ vai mới.
+- **Giao diện** làm khác phần mô tả ở mục 6: bàn tròn 2D có ghế, hình đại diện giống nhân vật trái cây trong rạp, **thẻ bài lật được** cho vai của mình (kèm cách chơi vai), **số phiếu hiện trên đầu từng người**, đồng hồ giữa bàn, **ghi chú chữ lời quản trò** giữa bàn cùng lúc phát giọng, **nút bật / tắt giọng đọc** (giọng đọc luôn to hết cỡ, chỉ bật hoặc tắt), nút mic và phím M ngay trong cửa sổ game, bố cục thu gọn tự bật trên điện thoại.
+- **Trạng thái riêng từng người** (mục 7.1) đã làm: server gửi mỗi người trạng thái của riêng họ.
+- **Âm thanh**: tiếng treo cổ, tiếng súng khi Thợ Săn bắn, sói hú lúc trời tối, tiếng cười phù thủy khi Phù Thủy nhắm mắt, chim hót lúc trời mới sáng, ếch nhái ban đêm vang từng đợt, thêm tiếng chọn / bỏ phiếu / đếm ngược / thắng thua (xem DESIGN.md mục 5.16).
+- **Chưa làm / còn mở**: thiếu file `gm_psychic_sleep`; ván có thể kết thúc ngay sau đêm 1 ở bàn nhỏ (đã thử chữa rồi bỏ theo ý người dùng); chưa chơi thử với nhiều người thật, trên điện thoại thật và iPhone (iPhone đã sửa phần phát giọng nhưng chỉ người dùng tự thử); bước 8 trong lộ trình (chơi thử rồi chỉnh luật) mới dừng ở thử bằng bot.
 
 ## 1. Tóm tắt
 
@@ -166,7 +185,7 @@ Bảng của masoi.online mô tả ngắn nên có chỗ mình phải tự quy�
 ## 7. Phần kỹ thuật cần lưu ý
 
 ### 7.1 Trạng thái riêng cho từng người
-Hiện server gửi **cùng một trạng thái cho tất cả** người đang mở game. Ma Sói cần ngược lại: mỗi người chỉ thấy vai của mình, Sói thấy nhau, người chết **xem được diễn biến nhưng không thấy vai của ai** (vì cũng không được lộ). Phải thêm kiểu gửi trạng thái riêng cho từng người. Đây là thay đổi lớn nhất so với các game hiện có.
+*(Đã làm: game có hàm `stateFor` để gửi riêng từng người.)* Trước đây server gửi **cùng một trạng thái cho tất cả** người đang mở game. Ma Sói cần ngược lại: mỗi người chỉ thấy vai của mình, Sói thấy nhau, người chết **xem được diễn biến nhưng không thấy vai của ai** (vì cũng không được lộ). Phải thêm kiểu gửi trạng thái riêng cho từng người. Đây là thay đổi lớn nhất so với các game hiện có.
 
 ### 7.2 Đồng hồ và giai đoạn trên server
 Mọi thứ do server đếm giờ (đếm ngược bắt đầu, đêm, ngày, bầu), client chỉ hiển thị. Cách này giống game Đập chuột đã có, và không ai chỉnh giờ được. Cần dọn đồng hồ khi phòng trống.
@@ -203,6 +222,8 @@ Dùng lại cách của bàn cược: đóng cửa sổ giữa ván thì có 60 
 
 ## 9. Lộ trình đề xuất
 
+*(Bước 1 đến 7 đã làm xong, gộp lại trong vài đợt; bước 8 mới dừng ở thử bằng bot, còn cần chơi thật.)*
+
 1. **Bước 1 (khung):** bàn chờ (5 đến 10 người, kiểm tra 100 điểm, đếm ngược, huỷ khi thiếu người), chia bài, chuyển đêm / ngày, bầu treo cổ, kiểm tra thắng thua, chỉ có Dân và Sói. Chạy thử được cả vòng.
 2. **Bước 2 (vai Dân):** thêm 8 vai Dân còn lại, và trạng thái riêng cho từng người (mục 7.1).
 3. **Bước 3 (vai Sói và phe thứ ba):** thêm Sói Con, Sói Đầu Đàn, Kẻ Phản Bội, Chán Đời, Sói Trắng, cùng các điều kiện thắng riêng.
@@ -215,6 +236,8 @@ Dùng lại cách của bàn cược: đóng cửa sổ giữa ván thì có 60 
 Sau bước 1 và 2 là có thể chơi được bản thô, nên bạn thử sớm và chỉnh hướng đi trước khi làm hết.
 
 ## 10. Điều mình chưa chắc
+
+*(Vẫn còn đúng sau khi làm xong; các ván thử mới là bot và ảnh chụp giả lập.)*
 
 - **Đội hình random chưa được thử bằng ván thật.** Điểm trong tài liệu chỉ là tham khảo. Khoảng −3 đến +3 có thể vẫn cho ra ván lệch phe, nhất là ván 5 người (chỉ một Sói) cần chơi thử nhiều.
 - **Luật của vai phức tạp** (Sói Trắng, Thần Tình Yêu, Kẻ Phản Bội, mục 4.4): bạn đã đồng ý cách hiểu của mình, nhưng vẫn cần thử bằng ván thật.

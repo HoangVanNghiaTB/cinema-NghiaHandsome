@@ -74,15 +74,9 @@ Vì không có thiết bị thật, phần lớn được thử bằng **Chrome 
 
 ## 4. Trạng thái hiện tại
 
-**Đã đẩy lên GitHub và Render** (commit mới nhất `6c55ce1`): mọi thứ tới hết đèn sân khấu.
+Mọi thứ trong tài liệu này (kể cả các đợt sau mục 7) **đã được commit và đẩy lên nhánh `main`** trên GitHub; Render tự build lại sau mỗi lần đẩy. Chỉ còn hai thứ cố ý để ngoài git của riêng người dùng: `TOM_TAT_DOAN_CHAT.md` và thư mục `client/public/sounds-quanTro/` (bản gốc các file thu giọng quản trò).
 
-**Chưa commit, chưa đẩy lên** (chỉ có ở máy local):
-- Nút video mới (tua 30 giây/5 phút/30 phút, nút phát/dừng gộp) và việc tắt phụ đề.
-- Toàn bộ hệ thống hành động nhân vật (vỗ tay, pháo giấy, lightstick, trái tim, tay tát): file mới `avatarHands.js`, `confetti.js`, `fpHand.js`, `clap.mp3`, và các chỗ sửa ở `main.js`, `avatars.js`, `sounds.js`, `touch.js`, `socket.js`, `server/index.js`, `index.html`.
-- `DESIGN.md` mới và việc xoá `PLAN.md`.
-- File tóm tắt này.
-
-Muốn đưa lên bản Render thì commit và push, Render sẽ tự build lại.
+Mô tả hệ thống đang chạy xem ở [DESIGN.md](DESIGN.md). Game Ma Sói: [DE_XUAT_MA_SOI.md](DE_XUAT_MA_SOI.md) (đề xuất ban đầu kèm phần hiện trạng) và [KICH_BAN_QUAN_TRO.md](KICH_BAN_QUAN_TRO.md) (lời quản trò đã thu).
 
 ## 5. Còn dang dở / chưa kiểm chứng
 
@@ -133,3 +127,50 @@ Muốn đưa lên bản Render thì commit và push, Render sẽ tự build lạ
 ## Tối ưu: voice theo khoảng cách và giảm lệnh vẽ
 - **Voice chỉ nối với người ở gần** (`net/voice.js` + `main.js`): vùng nghe là 7 m (`VOICE_FAR`), nên chỉ nối đường WebRTC khi người kia vào trong `VOICE_LINK_DIST` = 9 m và chỉ ngắt khi ra ngoài `VOICE_UNLINK_DIST` = 11 m (vùng đệm tránh nối/ngắt liên tục ở ranh giới). Người đã trả điểm và đang hát được nối với tất cả (cả phòng đều nghe), và khi mình đang hát thì nối với tất cả. Mỗi 0,5 giây xét lại ai cần nối / ngắt; ngắt thì gửi tin `bye` cho bên kia và chờ 3 giây mới nối lại (trừ khi họ lên hát); kết nối hỏng thì chờ 5 giây. Bên có id nhỏ hơn vẫn là bên tạo offer. Dòng "mic x/y" ở góc là số đường đã nối / số đường đang giữ (chỉ người ở gần). Đã thử bằng hai trình duyệt thật: gần thì 1/1, đi xa ~19 m thì 0/0, quay lại gần thì nối lại, người đã trả điểm hát thì nối dù ở xa, dừng hát thì ngắt.
 - **Giảm lệnh vẽ mỗi nhân vật, hình không đổi**: gộp mảnh trong `fruitRig.js` và `accessories.js`. Mỗi món phụ kiện (mũ, kính, tai, đồ sau lưng) là MỘT mesh (màu từng mảnh lưu thành màu đỉnh, vật liệu Lambert `vertexColors`); lá/cuống, nơ, tóc gộp theo chất liệu (`mergedParts`); mặt gộp tròng trắng (một mesh, chớp mắt co y quanh tâm hàng mắt nên vẫn chớp y như cũ), đồng tử, lông mày + mi, lấp lánh, má (`faceTemplate`). Chân, miệng, tay, tên giữ nguyên vì cử động riêng. Số mesh vẽ (chưa tính tay và nhãn tên) trung bình mỗi nhân vật: 25,3 → 14,1; với phòng đầy 10 người, số lệnh vẽ trong game thật giảm từ ≈ 224 xuống ≈ 147. Kiểm chứng "hình y hệt": dựng song song bản cũ và bản mới cho 84 bộ nhân vật (4 kiểu, 8 loại trái, từng phụ kiện, vài bộ đủ phụ kiện) ở cả lúc mở mắt và chớp mắt, so từng tam giác hiện ra (vị trí, pháp tuyến, màu thực tế, kiểu vật liệu): 0 khác; có phép đối chứng (dịch 1 cm thì bị phát hiện).
+
+---
+
+## 7. Các đợt sau (điểm, game, Ma Sói, âm thanh, admin)
+
+Thứ tự theo yêu cầu của người dùng. Chi tiết hiện trạng từng phần nằm ở [DESIGN.md](DESIGN.md) mục 5.12 đến 5.17.
+
+### 7.1 Nhặt rác kiếm điểm
+- Cứ 30 giây server thả rác ở chỗ ngẫu nhiên trong rạp, +10 đến +50 điểm, càng quý càng hiếm; ai nhặt trước được, rác biến mất, không lưu gì.
+- Yêu cầu của người dùng sau khi xem bản đầu: **bỏ cột sáng** (chỉ cần ánh sáng quanh món rác), và **nhặt phải là thao tác chủ động** (máy tính nhấn R, điện thoại dùng nút ngữ cảnh), khoảng cách nhặt giữ như cũ.
+- Sự cố: người dùng không thấy rác vì cổng 3000 vẫn là bản server cũ (cổng bị chiếm, server mới không chạy được). Bài học: kiểm tra server mới có thật sự lên không, tắt server cũ theo **cổng** chứ không tắt mọi tiến trình `node`.
+
+### 7.2 Trang admin và giữ server không ngủ
+- Mục tiêu chính của người dùng là **giữ server Render không ngủ**: server tự ping `/healthz`, kèm khuyến nghị đặt thêm dịch vụ ping ngoài (UptimeRobot, cron-job.org) vì tự ping không đánh thức được server đã ngủ.
+- Trang `/admin` (mật khẩu `ADMIN_PASSWORD`): xem tình trạng server, người trong từng phòng, chỉnh điểm, khoá chat, đá, cấm, tắt video, quản rác, gửi thông báo, nhật ký thao tác. Sau đó thêm chỉnh điểm khi mới vào, thông số game Ma Sói, rồi bộ thông số chung (phí hát, số người tối đa, đánh nhau, thưởng game đơn...) và danh sách người đã rời phòng còn điểm.
+- Cài đặt admin chỉ nằm trong RAM: server khởi động lại thì về mặc định.
+
+### 7.3 Cược cho game hai người
+Cờ Caro và Nối 4 đổi sang **cược bằng điểm** (10 đến 200, người ngồi trước chọn): thắng ăn cả hai phần cược, hoà hoàn lại, bỏ giữa ván là thua (đóng cửa sổ giữa ván được một lúc để quay lại rồi mới xử thua).
+
+### 7.4 Game Ma Sói
+- Người dùng gửi tài liệu luật; hai bên bàn qua một file đề xuất (`DE_XUAT_MA_SOI.md`) rồi người dùng chốt: hệ thống làm quản trò, **15 vai** ba phe, 5 đến 10 người, **phí 100 điểm** mỗi ván (Sói và phe thứ ba lãi 100, Dân lãi 50), ngồi rồi không đủ người thì ra không mất điểm, người chết bị tắt mic và chat, vai random sao cho tổng điểm đội hình từ −3 đến +3, không lộ vai người chết.
+- Giọng quản trò: người dùng tự thu các câu gọi vai trong `sounds-quanTro`; mình ghép theo kịch bản, chỉ gọi **những vai có trong ván**, theo thứ tự hợp lý (Bảo Vệ trước bầy Sói để Sói Đầu Đàn biết người bị cắn có được che không).
+- Giao diện 2D: bàn tròn có ghế, hình đại diện trái cây, thẻ bài lật được, số phiếu trên đầu từng người, phe thắng hiện to giữa bàn, nút bỏ qua thảo luận, ghi chú chữ lời quản trò, nút bật / tắt giọng đọc, mic ngay trong cửa sổ game, bố cục thu gọn cho điện thoại.
+- Sửa theo ý người dùng qua nhiều vòng: mỗi lời gọi **chỉ chọn một lần**; xong sớm thì sang vai kế; vai đã chia mà người giữ đã chết chờ 10 giây (cấu hình được) cho khỏi lộ; ban ngày mic tự do; Thợ Săn còn mic và chat trong 15 giây chọn người bắn; Sói Đầu Đàn chỉ biến được khi sau đó Sói vẫn ít hơn số người còn lại và Bảo Vệ không che người bị cắn; chat tin nhắn che trong game trên máy tính cho khỏi chồng lên cửa sổ game.
+- Chỗ đã đổi ý: có lúc thêm luật "đêm đầu không cho thắng ngay" để chữa ca ván kết thúc ngay sau đêm 1 (thấy bằng bot), người dùng bảo bỏ, mình đã hoàn lại. **Ca ván kết thúc quá sớm vẫn có thể xảy ra** ở bàn nhỏ.
+- Sự cố trên **iPhone**: không nghe giọng đọc, hoặc chỉ nghe một câu sau khi bật lại. Nguyên nhân: iOS chỉ cho phát tiếng khi vừa có thao tác chạm, mỗi `Audio` tạo mới không được mở khoá. Đã đổi sang vài phần tử âm thanh dùng lại, mở khoá ở lần chạm đầu. Người dùng xác nhận chạy.
+
+### 7.5 Âm thanh trong game
+- Bộ tiếng chung tự tạo bằng Web Audio (`client/src/audio/sfx.js`): bấm nút, đến lượt, đặt quân, quân rơi, gộp ô, ăn mồi, đập chuột, xúc xắc, xu, thắng / thua / hoà, đếm ngược, chuông, bỏ phiếu... Gắn vào mọi game. Những tiếng cần chất liệu thật (sói hú, ếch nhái, chim, súng, tiếng cười phù thủy, tiếng treo cổ, bonk) do người dùng đưa file, mình cắt, giảm dung lượng (từ khoảng 10 MB còn khoảng 2 MB) rồi ghép; không dùng nhạc nền.
+- Chim hót chỉ lúc trời mới sáng; ếch nhái ban đêm vang từng đợt 8 đến 14 giây rồi nghỉ 5 đến 6 giây.
+- **Bảng Âm thanh** riêng (phím O, nút 🔊) thay các thanh trong menu chung: chỉ chỉnh to nhỏ; giọng đọc quản trò luôn to hết cỡ. Trong lúc đang mở game có nút 🔊 trên thanh game để chỉnh ngay.
+- **Thanh nút cài đặt** cho máy tính: nhấn Ctrl hiện thanh Ví, Âm thanh, Mic, Góc nhìn, Menu. Cố ý không làm nút đánh, nhặt, cảm xúc.
+- Một lỗi tự gây ra rồi tự sửa: khi thêm nút âm thanh trên thanh game, lỡ chèn dòng đặt nút vào hàm mở bảng chỉnh mic hát (build không báo lỗi nhưng chạy sẽ lỗi); đã chuyển về đúng hàm.
+
+### 7.6 Cách kiểm tra đã dùng ở các đợt này
+- **Bot socket.io** chơi nhiều ván Ma Sói với tốc độ nhanh (biến môi trường `WW_SPEED`, chỉ để thử) và kiểm tra luật, mic, chat, thanh toán.
+- **Chrome không đầu** chụp ảnh giao diện (máy tính 1000×640, điện thoại ngang 800×360).
+- Kiểm tra bộ phát âm bằng AudioContext giả (chạy đủ các tiếng không lỗi), giải mã mp3 trong Node để đo độ dài, độ to khi cắt file.
+- **Không thay thế được thử thật**: tiếng nghe có hay không, iPhone, điện thoại thật, nhiều người thật chơi cùng lúc.
+
+### 7.7 Còn dang dở thêm
+- Chưa thử Ma Sói và tiếng game trên thiết bị thật nhiều người; mức to nhỏ các tiếng (ếch, chim, sói hú, click) là ước lượng.
+- Thiếu file `gm_psychic_sleep` (lời "Nhà Ngoại Cảm nhắm mắt lại").
+- Điểm, phụ kiện, cài đặt admin không lưu qua lần khởi động lại.
+- Tắt mic ban đêm chỉ ép được ở trình duyệt của người chơi.
+- Nút 🔊 thêm trên thanh tiêu đề game có thể chật trên điện thoại nhỏ (chưa xem trên máy thật).

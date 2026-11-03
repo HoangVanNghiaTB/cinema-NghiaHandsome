@@ -158,6 +158,49 @@ function renderServer() {
   );
 }
 
+// Thông số chung của rạp (điểm hát, số người, đánh nhau, thưởng game...). Giới hạn do server kẹp lại.
+const GENERAL = [
+  ['Hát karaoke', [
+    ['singCost', 'Phí vào hát mỗi lần', 0, 1000, 'điểm'],
+  ]],
+  ['Phòng', [
+    ['maxPlayers', 'Số người tối đa mỗi phòng', 2, 10, 'người'],
+    ['roomResetSec', 'Phòng trống bao lâu thì xoá điểm / game', 10, 3600, 'giây'],
+  ]],
+  ['Đánh nhau', [
+    ['punchCooldownSec', 'Chờ giữa hai cú đánh', 0.5, 10, 'giây'],
+    ['stunSec', 'Thời gian choáng', 0.5, 10, 'giây'],
+  ]],
+  ['Thưởng và ván chơi', [
+    ['rewardPct', 'Điểm thưởng Đập chuột, Rắn, 2048, Bình chọn phim', 0, 500, '% mức gốc'],
+    ['soloGapSec', 'Rắn / 2048: cách nhau bao lâu mới thưởng tiếp', 0, 300, 'giây'],
+    ['duelAwaySec', 'Caro / Nối 4: đóng cửa sổ giữa ván, chờ bao lâu thì xử thua', 10, 600, 'giây'],
+  ]],
+];
+function renderGeneral() {
+  const st = state.settings;
+  const inputs = new Map();
+  const punch = h('input', { type: 'checkbox', checked: st.punchEnabled });
+  const body = GENERAL.map(([group, rows]) => h('div', { style: 'margin-top:10px' }, h('b', {}, group),
+    group === 'Đánh nhau' ? h('div', { class: 'row', style: 'margin:3px 0' }, h('label', {}, punch, ' Cho phép đánh nhau')) : '',
+    rows.map(([key, label, lo, hi, unit]) => {
+      const input = h('input', { type: 'number', min: lo, max: hi, step: lo < 1 ? 0.5 : 1, value: st[key], title: `${lo} đến ${hi} ${unit}` });
+      inputs.set(key, input);
+      return h('div', { class: 'row', style: 'margin:3px 0' }, h('span', { style: 'min-width:300px' }, label), input, h('span', { class: 'dim' }, unit));
+    })));
+  const save = () => {
+    const out = { punchEnabled: punch.checked };
+    for (const [key, input] of inputs) out[key] = Number(input.value);
+    run('settings', out);
+  };
+  return h('div', { class: 'card' },
+    h('h2', {}, 'Thông số chung của rạp'),
+    body,
+    h('div', { class: 'row', style: 'margin-top:10px' }, h('button', { onclick: save }, 'Lưu thông số chung')),
+    h('div', { class: 'dim' }, 'Áp dụng ngay cho mọi phòng. Bảng "Kiếm điểm" trong ví vẫn ghi mức gốc của mỗi game, không tự đổi theo % thưởng. Giá trị ngoài giới hạn tự kéo về mức gần nhất; cài đặt về mặc định khi server khởi động lại.'),
+  );
+}
+
 const getPath = (o, path) => path.split('.').reduce((a, k) => a?.[k], o);
 const setPath = (o, path, v) => {
   const parts = path.split('.');
@@ -222,6 +265,19 @@ function renderRoom(r) {
       )),
     );
   });
+  const offlineRows = (r.offline ?? []).map((p) => {
+    const amt = h('input', { type: 'number', value: 50 });
+    const pts = (mode, sign) => run('points', { room: r.id, cid: p.cid, mode, amount: sign * Number(amt.value) });
+    return h('tr', {},
+      h('td', {}, h('b', {}, p.name)),
+      h('td', { class: 'dim' }, p.seenAt ? 'rời lúc ' + fmtTime(p.seenAt) : ''),
+      h('td', {}, String(p.pts)),
+      h('td', {}, h('div', { class: 'row', style: 'margin:0' }, amt,
+        h('button', { onclick: () => pts('add', 1) }, '+'),
+        h('button', { onclick: () => pts('add', -1) }, '−'),
+        h('button', { onclick: () => pts('set', 1) }, 'Đặt'))),
+    );
+  });
   const v = r.video;
   return h('div', { class: 'card' },
     h('div', { class: 'row' },
@@ -238,6 +294,10 @@ function renderRoom(r) {
       h('button', { class: 'danger', onclick: () => confirm('Xoá điểm, phụ kiện, xếp hạng game và rác của phòng ' + r.name + '?') && run('reset-room', { room: r.id }) }, 'Xoá dữ liệu phòng'),
     ),
     cnt ? h('div', { class: 'tablewrap' }, h('table', {}, h('tr', {}, ['Tên', 'Vị trí', 'Điểm', 'Địa chỉ', 'Thao tác'].map((c) => h('th', {}, c))), rows)) : h('div', { class: 'dim' }, 'Phòng trống.'),
+    offlineRows.length ? [
+      h('h3', { style: 'margin:14px 0 4px' }, 'Đã rời phòng (còn điểm, xoá khi phòng trống quá lâu)'),
+      h('div', { class: 'tablewrap' }, h('table', {}, h('tr', {}, ['Tên', 'Lần cuối', 'Điểm', 'Chỉnh điểm'].map((c) => h('th', {}, c))), offlineRows)),
+    ] : '',
   );
 }
 
@@ -257,7 +317,7 @@ function render() {
   // Đang gõ vào ô nào thì không vẽ lại, tránh mất chữ đang nhập
   if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
   $('updated').textContent = 'cập nhật ' + fmtTime(state.now);
-  $('content').replaceChildren(renderServer(), renderWerewolf(), renderNotice(), state.rooms.map(renderRoom), renderBans(), renderLog());
+  $('content').replaceChildren(renderServer(), renderGeneral(), renderWerewolf(), renderNotice(), state.rooms.map(renderRoom), renderBans(), renderLog());
 }
 
 async function refresh() {

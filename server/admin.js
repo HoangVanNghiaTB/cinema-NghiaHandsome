@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import path from 'path';
 import express from 'express';
 import { WW_FIELDS, wwDefaults } from '../client/src/games/werewolf/roles.js';
+import { MAX_PLAYERS } from '../client/src/rooms.js';
 
 const TOKEN_MS = 12 * 60 * 60 * 1000;
 const MAX_FAILS = 6;
@@ -170,7 +171,7 @@ export function createAdmin(app, { rooms, settings, bans, clientIp }) {
     const amt = Math.floor(Number(b.amount));
     if (!Number.isFinite(amt) || Math.abs(amt) > 100000) throw new Error('Số điểm không hợp lệ.');
     const w = r.admin.wallet;
-    const who = r.admin.playerByCid(b.cid)?.name ?? b.cid;
+    const who = r.admin.playerByCid(b.cid)?.name ?? r.admin.wallet.list().find((a) => a.cid === b.cid)?.name ?? b.cid;
     if (b.mode === 'set') w.setPts(b.cid, amt, 'Quản trị viên đặt lại điểm');
     else if (amt >= 0) w.add(b.cid, amt, 'Quản trị viên tặng điểm');
     else w.setPts(b.cid, w.pts(b.cid) + amt, 'Quản trị viên trừ điểm');
@@ -210,6 +211,26 @@ export function createAdmin(app, { rooms, settings, bans, clientIp }) {
       if (w.max < w.min) w.max = w.min; // ghế không ít hơn số người tối thiểu
       if (w.minHumans > w.min) w.minHumans = w.min;
       if (changed.length) note(`Ma Sói: chỉnh ${changed.length} thông số`);
+    }
+    // Các thông số chung: [khoá, thấp nhất, cao nhất, nhãn ghi nhật ký]; boolean xử lý riêng bên dưới
+    const NUMS = [
+      ['singCost', 0, 1000, 'Phí hát karaoke'],
+      ['maxPlayers', 2, MAX_PLAYERS, 'Số người tối đa mỗi phòng'],
+      ['roomResetSec', 10, 3600, 'Giây dọn phòng trống'],
+      ['punchCooldownSec', 0.5, 10, 'Giây chờ giữa hai cú đánh'],
+      ['stunSec', 0.5, 10, 'Giây choáng'],
+      ['rewardPct', 0, 500, '% điểm thưởng game đơn'],
+      ['soloGapSec', 0, 300, 'Giây giữa hai lần thưởng Rắn / 2048'],
+      ['duelAwaySec', 10, 600, 'Giây chờ khi bỏ ván Caro / Nối 4'],
+    ];
+    for (const [key, lo, hi, label] of NUMS) {
+      if (b[key] === undefined) continue;
+      settings[key] = Math.round(clamp(b[key], lo, hi) * 10) / 10;
+      note(`${label}: ${settings[key]}`);
+    }
+    if (typeof b.punchEnabled === 'boolean') {
+      settings.punchEnabled = b.punchEnabled;
+      note(`Đánh nhau: ${b.punchEnabled ? 'bật' : 'tắt'}`);
     }
     if (b.startPoints !== undefined) {
       settings.startPoints = Math.floor(clamp(b.startPoints, 0, 100000));

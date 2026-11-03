@@ -17,7 +17,7 @@ const LEADERBOARD_SIZE = 5;
 // Chơi lại ("Ván mới") cần cả hai cùng bấm, vì mỗi ván lại trừ cược.
 const DUEL_AWAY_MS = 60000;
 
-function makeDuel(sides, { players, wallet, notify, onChange, label, reset, moves, setWinner }) {
+function makeDuel(sides, { players, wallet, notify, onChange, label, reset, moves, setWinner, awayMs = () => DUEL_AWAY_MS }) {
   const seats = Object.fromEntries(sides.map((s) => [s, null]));
   const ready = new Set();
   const awayTimers = new Map(); // bên -> hẹn giờ xử thua
@@ -103,7 +103,7 @@ function makeDuel(sides, { players, wallet, notify, onChange, label, reset, move
       awayTimers.set(side, setTimeout(() => {
         awayTimers.delete(side);
         if (leave(id)) onChange();
-      }, DUEL_AWAY_MS));
+      }, awayMs()));
       return true;
     },
     back(id) {
@@ -158,10 +158,10 @@ function makeDuel(sides, { players, wallet, notify, onChange, label, reset, move
 const CARO_N = 13;
 const CARO_WIN = 5;
 
-function makeCaro({ players, wallet, notify, onChange }) {
+function makeCaro({ players, wallet, notify, onChange, awayMs }) {
   let board, turn, winner, line, last;
   const duel = makeDuel(['X', 'O'], {
-    players, wallet, notify, onChange, label: 'Cờ Caro',
+    players, wallet, notify, onChange, awayMs, label: 'Cờ Caro',
     reset: () => reset(),
     moves: () => board.filter((c) => c !== '.').length,
     setWinner: (s) => { winner = s; },
@@ -371,7 +371,7 @@ function makeWhack({ onChange, roomSize, reward }) {
 // ----- Game chơi một mình (Rắn, 2048...): chơi ở client, server chỉ giữ bảng kỷ lục -----
 // rewardOf(điểm) = số điểm rạp thưởng; mỗi người chỉ được thưởng một lần mỗi SOLO_REWARD_GAP_MS
 const SOLO_REWARD_GAP_MS = 20000;
-function makeSolo(maxScore, { reward, label, rewardOf }) {
+function makeSolo(maxScore, { reward, label, rewardOf, gapMs = () => SOLO_REWARD_GAP_MS }) {
   const top = [];
   const lastAt = new Map();
   const lastReward = new Map();
@@ -386,7 +386,7 @@ function makeSolo(maxScore, { reward, label, rewardOf }) {
       top.push({ name: p.name, score: v });
       top.sort((a, b) => b.score - a.score);
       top.length = Math.min(top.length, LEADERBOARD_SIZE);
-      if (now - (lastReward.get(p.id) ?? 0) >= SOLO_REWARD_GAP_MS) {
+      if (now - (lastReward.get(p.id) ?? 0) >= gapMs()) {
         lastReward.set(p.id, now);
         reward(p.id, rewardOf(v), label);
       }
@@ -400,10 +400,10 @@ function makeSolo(maxScore, { reward, label, rewardOf }) {
 const C4_COLS = 7;
 const C4_ROWS = 6;
 
-function makeConnect4({ players, wallet, notify, onChange }) {
+function makeConnect4({ players, wallet, notify, onChange, awayMs }) {
   let board, turn, winner, line, last;
   const duel = makeDuel(['R', 'Y'], {
-    players, wallet, notify, onChange, label: 'Nối 4',
+    players, wallet, notify, onChange, awayMs, label: 'Nối 4',
     reset: () => reset(),
     moves: () => board.filter((c) => c !== '.').length,
     setWinner: (s) => { winner = s; },
@@ -653,9 +653,11 @@ function makeDice({ onChange, players, wallet }) {
 // opts.werewolf: thông số Ma Sói chỉnh được ở trang admin (xem wwDefaults ở client/src/games/werewolf/roles.js)
 export function createGames(io, players, wallet, opts = {}) {
   // Thưởng điểm rạp cho người chơi có id socket này (đã rời phòng thì thôi)
+  const live = () => opts.live?.() ?? {}; // cài đặt chỉnh được lúc đang chạy (trang admin), đọc mỗi lần dùng
   const reward = (id, amt, reason) => {
     const p = players.get(id);
-    if (p && amt > 0) wallet.add(p.cid, amt, reason);
+    const scaled = Math.round((amt * (live().rewardPct ?? 100)) / 100); // hệ số thưởng game đơn do admin chỉnh
+    if (p && scaled > 0) wallet.add(p.cid, scaled, reason);
   };
   const notify = (id, text) => io.to(id).emit('notice', { text });
   const roomOf = (id) => `game:${id}`;
@@ -682,11 +684,11 @@ export function createGames(io, players, wallet, opts = {}) {
   // Dựng (hoặc dựng lại từ đầu) mọi game: bàn cờ, điểm, bảng kỷ lục đều về trống
   function init() {
     for (const g of Object.values(games)) g.dispose?.();
-    games.caro = makeCaro({ players, wallet, notify, onChange: () => push('caro') });
+    games.caro = makeCaro({ awayMs: () => live().duelAwaySec * 1000 || DUEL_AWAY_MS, players, wallet, notify, onChange: () => push('caro') });
     games.whack = makeWhack({ onChange: () => push('whack'), roomSize: () => roomSize('whack'), reward });
-    games.snake = makeSolo(2000, { reward, label: 'Rắn săn mồi', rewardOf: (v) => Math.min(25, Math.floor(v / 2)) });
-    games.g2048 = makeSolo(1000000, { reward, label: '2048', rewardOf: (v) => Math.min(30, Math.floor(v / 150)) });
-    games.connect4 = makeConnect4({ players, wallet, notify, onChange: () => push('connect4') });
+    games.snake = makeSolo(2000, { reward, gapMs: () => live().soloGapSec * 1000 || 0, label: 'Rắn săn mồi', rewardOf: (v) => Math.min(25, Math.floor(v / 2)) });
+    games.g2048 = makeSolo(1000000, { reward, gapMs: () => live().soloGapSec * 1000 || 0, label: '2048', rewardOf: (v) => Math.min(30, Math.floor(v / 150)) });
+    games.connect4 = makeConnect4({ awayMs: () => live().duelAwaySec * 1000 || DUEL_AWAY_MS, players, wallet, notify, onChange: () => push('connect4') });
     games.vote = makeVote(players, { reward });
     games.dice = makeDice({ onChange: () => push('dice'), players, wallet });
     games.werewolf = makeWerewolf({

@@ -1,8 +1,8 @@
 # Kịch bản thu giọng quản trò Ma Sói
 
-Danh sách các câu quản trò cần thu, kèm tên file để mình ghép vào game. Mỗi câu là một file riêng. Chưa có gì trong game đọc các file này; mình sẽ làm khi bắt đầu viết game.
+Danh sách các câu quản trò, kèm tên file. Mỗi câu là một file riêng đặt ở `client/public/gm/`, tên `gm_<tên>.mp3`. **Game Ma Sói đang đọc đúng các file này** (cấu hình thứ tự và thời lượng ở `client/src/games/werewolf/narration.js`); bản gốc người dùng thu để ở `client/public/sounds-quanTro/` (không đưa lên git). Cùng lúc phát tiếng, game cũng hiện lời đó dưới dạng chữ giữa bàn, và mỗi người tự bật / tắt được giọng đọc.
 
-Chỉ gồm **thông báo trời tối, trời sáng** và **lời gọi các vai** trong một đêm.
+Gồm **thông báo trời tối, trời sáng, hết giờ thảo luận** và **lời gọi các vai** trong một đêm.
 
 ## Cách thu
 
@@ -10,14 +10,15 @@ Chỉ gồm **thông báo trời tối, trời sáng** và **lời gọi các va
 - **Mỗi câu một file**, dài khoảng 2 đến 6 giây. Chừa chừng nửa giây im lặng ở đầu và cuối.
 - Định dạng **mp3** (hoặc wav, mình đổi sang mp3 được), một kênh (mono) là đủ.
 - Giữ **âm lượng đều nhau** giữa các câu.
-- Đặt tên file đúng như cột "Tên file". Chưa thu hết cũng được, game sẽ bỏ qua câu nào chưa có file.
+- Đặt tên file đúng như cột "Tên file". Chưa thu hết cũng được, game bỏ qua câu nào chưa có file (chữ vẫn hiện).
 
 ## Trời tối, trời sáng
 
 | # | Tên file | Lời đọc | Dùng khi |
 |---|---|---|---|
 | 1 | `gm_night_start` | "Trời tối rồi, mọi người nhắm mắt lại." | Bắt đầu đêm |
-| 2 | `gm_dawn` | "Trời sáng rồi, mọi người mở mắt." | Hết đêm |
+| 2 | `gm_dawn` | "Trời sáng rồi, mọi người mở mắt." | Hết đêm (kèm tiếng chim hót lúc trời mới sáng) |
+| 2b | `gm_vote_start` | "Hết giờ thảo luận. Mời mọi người bỏ phiếu." | Chuyển sang bỏ phiếu |
 
 ## Gọi các vai trong đêm
 
@@ -30,6 +31,7 @@ Mỗi vai có một câu **thức dậy** và một câu **nhắm mắt**. Riên
 | 5 | `gm_traitor_wake` | "Kẻ Phản Bội thức dậy. Hãy nhận ra bầy Sói." | Chỉ gọi đêm đầu |
 | 6 | `gm_traitor_sleep` | "Kẻ Phản Bội nhắm mắt lại." | |
 | 7 | `gm_wolf_wake` | "Ma Sói thức dậy. Hãy chọn một người để cắn." | |
+| 7b | `gm_wolf_wake_short` | (bản đọc ngắn của câu gọi Ma Sói) | Có file nhưng game hiện chưa dùng |
 | 8 | `gm_wolf_sleep` | "Ma Sói nhắm mắt lại." | |
 | 9 | `gm_alpha_wake` | "Sói Đầu Đàn thức dậy. Bạn có muốn biến người bị cắn thành Sói không?" | |
 | 10 | `gm_alpha_sleep` | "Sói Đầu Đàn nhắm mắt lại." | |
@@ -43,7 +45,7 @@ Mỗi vai có một câu **thức dậy** và một câu **nhắm mắt**. Riên
 | 18 | `gm_witch_poison` | "Phù Thủy, bạn có muốn dùng bình độc với ai không?" | Phát sau khi Phù Thủy chọn xong chuyện cứu |
 | 19 | `gm_witch_sleep` | "Phù Thủy nhắm mắt lại." | |
 | 20 | `gm_psychic_wake` | "Nhà Ngoại Cảm thức dậy. Hãy chọn hai người để so sánh." | |
-| 21 | `gm_psychic_sleep` | "Nhà Ngoại Cảm nhắm mắt lại." | |
+| 21 | `gm_psychic_sleep` | "Nhà Ngoại Cảm nhắm mắt lại." | **Chưa có file**: game bỏ qua tiếng, chữ vẫn hiện |
 
 Các vai **không có việc ban đêm** nên không cần lời gọi: Dân làng, Thợ Săn, Thị Trưởng, Hoàng Tử, Sói Con, Chán Đời.
 
@@ -53,6 +55,6 @@ Mỗi đêm quản trò **chỉ gọi những vai đã được chia trong ván 
 
 ## Tổng cộng
 
-**21 câu**: 2 câu trời tối / sáng và 19 câu gọi vai (8 vai × 2 câu, cộng Phù Thủy 3 câu).
+**23 câu** trong kịch bản (2 câu trời tối / sáng, 1 câu bỏ phiếu, 1 bản ngắn gọi Ma Sói và 19 câu gọi vai: 8 vai × 2 câu, cộng Phù Thủy 3 câu). **Hiện có 22 file** trong `client/public/gm/`, còn thiếu `gm_psychic_sleep`.
 
 Không câu nào nói tên người chơi. Bạn thu xong thì bỏ file vào một thư mục (ví dụ `client/public/gm/`). Câu nào chưa có file thì game vẫn chạy, chỉ không có tiếng.

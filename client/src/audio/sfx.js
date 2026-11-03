@@ -187,7 +187,7 @@ const FILES = {
   howl: { url: '/sfx/wolf_howl.mp3', gain: 0.3, dur: 6.5, fadeOut: 2 },
   laugh: { url: '/sfx/witch_laugh.mp3', gain: 0.35, dur: 4, fadeOut: 1.5 },
   dawnBirds: { url: '/sfx/dawn_birds.mp3', gain: 0.4, fadeIn: 1.5, fadeOut: 4 },
-  ambNight: { url: '/sfx/amb_night.mp3', gain: 0.25, ambient: true, burst: { on: [8, 14], off: [20, 45] } },
+  ambNight: { url: '/sfx/amb_night.mp3', gain: 0.25, ambient: true, burst: { on: [8, 14], off: [5, 6] } },
 };
 const rand = ([a, b]) => a + Math.random() * (b - a);
 const buffers = {};

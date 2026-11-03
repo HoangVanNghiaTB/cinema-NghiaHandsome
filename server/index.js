@@ -47,7 +47,20 @@ if (process.env.TURN_URL) {
 const app = express();
 
 // Cài đặt chỉnh được lúc đang chạy qua trang admin (server/admin.js); khởi động lại thì về mặc định
-const settings = { startPoints: START_POINTS, werewolf: wwDefaults(), trash: { enabled: true, everyMs: TRASH_EVERY_MS, max: TRASH_MAX } };
+const settings = {
+  startPoints: START_POINTS,
+  singCost: SING_COST, // điểm để vào hát karaoke
+  maxPlayers: MAX_PLAYERS, // số người tối đa mỗi phòng (không vượt quá MAX_PLAYERS: mạng voice nối mesh, 18 ghế)
+  roomResetSec: Number(process.env.ROOM_RESET_MS) / 1000 || 60, // phòng trống quá ngần này thì xoá điểm / game
+  punchEnabled: true,
+  punchCooldownSec: PUNCH_COOLDOWN_MS / 1000,
+  stunSec: STUN_MS / 1000,
+  rewardPct: 100, // % điểm thưởng của Đập chuột, Rắn, 2048, Bình chọn phim (cược Caro, Nối 4, xúc xắc không đổi)
+  soloGapSec: 20, // Rắn / 2048: cách nhau ngần này giây mới được thưởng tiếp
+  duelAwaySec: 60, // Caro / Nối 4: đóng cửa sổ giữa ván, quá ngần này giây thì xử thua
+  werewolf: wwDefaults(),
+  trash: { enabled: true, everyMs: TRASH_EVERY_MS, max: TRASH_MAX },
+};
 
 // Cấm vào: khoá `cid:<clientId>` hoặc `ip:<địa chỉ>` -> thời điểm hết cấm (Infinity = tới khi server khởi động lại)
 const bans = new Map();
@@ -88,11 +101,11 @@ function createRoom(nsp, cfg) {
 
   // Điểm của rạp (xem server/wallet.js) và mini game treo tường (xem server/games.js)
   const wallet = createWallet(nsp, players, () => settings.startPoints);
-  const games = createGames(nsp, players, wallet, { werewolf: settings.werewolf });
+  const games = createGames(nsp, players, wallet, { werewolf: settings.werewolf, live: () => settings });
   const trash = createTrash(nsp, players, wallet, settings.trash); // rác rơi trong rạp, nhặt để lấy điểm (server/trash.js)
 
   // Phòng trống quá ngần này thì xoá dữ liệu điểm / phụ kiện / xếp hạng game (tải lại trang một mình thì chưa mất)
-  const ROOM_RESET_MS = Number(process.env.ROOM_RESET_MS) || 60000;
+  const roomResetMs = () => settings.roomResetSec * 1000;
   let resetTimer = null;
 
   // Người chơi gửi cho người khác: bỏ khoá tài khoản điểm (cid) và các thứ chỉ server dùng
@@ -174,7 +187,7 @@ function createRoom(nsp, cfg) {
         socket.disconnect(true);
         return;
       }
-      if (players.size >= MAX_PLAYERS) {
+      if (players.size >= settings.maxPlayers) {
         socket.emit('room-full');
         socket.disconnect(true);
         return;
@@ -203,13 +216,14 @@ function createRoom(nsp, cfg) {
         immuneUntil: 0,
       };
       players.set(socket.id, player);
+      wallet.touch(cid, player.name);
       socket.emit('init', {
         id: socket.id,
         players: [...players.values()].filter((p) => p.id !== socket.id).map(publicPlayer),
         video: videoSnapshot(),
         mix,
         games: games.briefs(),
-        self: { look: player.look, wallet: wallet.snapshot(cid), trash: trash.list() },
+        self: { look: player.look, wallet: wallet.snapshot(cid), trash: trash.list(), singCost: settings.singCost },
         iceServers,
       });
       socket.broadcast.emit('player-joined', publicPlayer(player));
@@ -279,15 +293,15 @@ function createRoom(nsp, cfg) {
           nsp.to(p.id).emit('notice', { text: 'Hết thời gian xác nhận, bạn đã xuống sân khấu.' });
         }
       }, SING_PROMPT_MS + 1500));
-      nsp.emit('stage-update', { id: p.id, stage, paid: false });
+      nsp.emit('stage-update', { id: p.id, stage, paid: false, cost: settings.singCost });
     });
 
     // Đồng ý dùng điểm để hát: trừ điểm rồi mới cho phát tiếng hát
     socket.on('sing-pay', () => {
       const p = players.get(socket.id);
       if (!p || p.stage === null || p.singPaid) return;
-      if (!wallet.pay(p.cid, SING_COST, 'Vào hát karaoke')) {
-        socket.emit('notice', { text: `Không đủ ${SING_COST} điểm để vào hát.` });
+      if (settings.singCost > 0 && !wallet.pay(p.cid, settings.singCost, 'Vào hát karaoke')) {
+        socket.emit('notice', { text: `Không đủ ${settings.singCost} điểm để vào hát.` });
         leaveStage(p);
         return;
       }
@@ -312,9 +326,9 @@ function createRoom(nsp, cfg) {
     // Đánh: người gần nhất ở phía trước trong tầm đánh bị choáng; đang ngồi thì bị văng khỏi ghế
     socket.on('punch', () => {
       const p = players.get(socket.id);
-      if (!p) return;
+      if (!p || !settings.punchEnabled) return;
       const now = Date.now();
-      if (now - p.lastPunchAt < PUNCH_COOLDOWN_MS || now < p.stunnedUntil) return;
+      if (now - p.lastPunchAt < settings.punchCooldownSec * 1000 || now < p.stunnedUntil) return;
       p.lastPunchAt = now;
       nsp.emit('swing', { id: p.id }); // mọi cú tát đều hiện tay vung ra, trúng hay hụt
 
@@ -333,14 +347,15 @@ function createRoom(nsp, cfg) {
       }
       if (!target) return;
 
-      target.stunnedUntil = now + STUN_MS;
+      const stunMs = settings.stunSec * 1000;
+      target.stunnedUntil = now + stunMs;
       target.immuneUntil = target.stunnedUntil + STUN_IMMUNE_MS;
       if (target.seat !== null) {
         target.seat = null;
         nsp.emit('seat-update', { id: target.id, seat: null });
       }
       leaveStage(target); // đang hát mà bị đánh thì bị đẩy khỏi sân khấu (không hoàn điểm)
-      nsp.emit('stun', { id: target.id, by: p.id, duration: STUN_MS });
+      nsp.emit('stun', { id: target.id, by: p.id, duration: stunMs });
     });
 
     // Chuyển tiếp tín hiệu WebRTC (voice chat) giữa hai người trong phòng
@@ -415,7 +430,10 @@ function createRoom(nsp, cfg) {
 
     socket.on('disconnect', () => {
       const leaving = players.get(socket.id);
-      if (leaving) leaveStage(leaving);
+      if (leaving) {
+        leaveStage(leaving);
+        wallet.touch(leaving.cid, leaving.name);
+      }
       if (!players.delete(socket.id)) return;
       nsp.emit('player-left', socket.id);
       // Phòng trống thì xoá video cũ, trả bảng chỉnh âm về mặc định; điểm, phụ kiện và dữ liệu mini game xoá sau ROOM_RESET_MS
@@ -429,7 +447,7 @@ function createRoom(nsp, cfg) {
             games.reset();
             wallet.reset();
           }
-        }, ROOM_RESET_MS);
+        }, roomResetMs());
       }
     });
   });
@@ -441,12 +459,18 @@ function createRoom(nsp, cfg) {
       name: cfg.name,
       locked: !!cfg.locked,
       ready: !cfg.locked || !!secretOf(cfg),
-      max: MAX_PLAYERS,
+      max: settings.maxPlayers,
       video: videoSnapshot(),
       trash: trash.list().length,
       players: [...players.values()].map((p) => ({
         id: p.id, cid: p.cid, ip: p.ip, name: p.name, seat: p.seat, stage: p.stage, muted: p.muted, pts: wallet.pts(p.cid),
       })),
+      // Tài khoản điểm của người đã rời phòng (còn tới khi phòng bị dọn): vẫn thấy tên và chỉnh được điểm
+      offline: wallet
+        .list()
+        .filter((a) => a.name && ![...players.values()].some((p) => p.cid === a.cid))
+        .sort((a, b) => b.seenAt - a.seenAt)
+        .map((a) => ({ cid: a.cid, name: a.name, pts: a.pts, seenAt: a.seenAt })),
     }),
     // Đá người ra; banMs = thời gian cấm vào lại (Infinity: tới khi khởi động lại, cấm cả địa chỉ)
     kick(id, banMs) {
@@ -490,7 +514,7 @@ adminTools.keepAlive.start();
 // Số người đang ở từng phòng (màn hình đăng nhập hiện "x/30") và phòng khoá đã cài mật khẩu chưa
 app.get('/api/rooms', (req, res) => {
   if (!isProd) res.set('Access-Control-Allow-Origin', '*'); // dev: trang ở cổng 5173
-  res.json(rooms.map((r) => ({ id: r.cfg.id, players: r.count(), max: MAX_PLAYERS, ready: !r.cfg.locked || !!secretOf(r.cfg) })));
+  res.json(rooms.map((r) => ({ id: r.cfg.id, players: r.count(), max: settings.maxPlayers, ready: !r.cfg.locked || !!secretOf(r.cfg) })));
 });
 for (const cfg of ROOMS) if (cfg.locked && !secretOf(cfg)) console.warn(`Phòng "${cfg.name}" bị khoá nhưng chưa đặt biến môi trường ROOM_PASSWORD_${cfg.id.toUpperCase()}: chưa ai vào được.`);
 

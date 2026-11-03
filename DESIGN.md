@@ -4,7 +4,7 @@ Tài liệu này mô tả hệ thống **đang có trong code** (không phải k
 
 ## 1. Hệ thống là gì
 
-Một trang web 3D mô phỏng phòng chiếu phim. Có **3 phòng** (1 phòng riêng cần mật khẩu, 2 phòng khách), mỗi phòng tối đa **10 người** (cả rạp tối đa 30), đi lại, nói chuyện bằng giọng, nhắn tin, cùng xem **một video YouTube đồng bộ** trên màn hình lớn, ngồi ghế, lên sân khấu hát karaoke và đánh nhau cho vui. Chạy được trên máy tính và điện thoại (điện thoại phải xoay ngang).
+Một trang web 3D mô phỏng phòng chiếu phim. Có **3 phòng** (1 phòng riêng cần mật khẩu, 2 phòng khách), mỗi phòng tối đa **10 người** (cả rạp tối đa 30; admin hạ được số này), đi lại, nói chuyện bằng giọng, nhắn tin, cùng xem **một video YouTube đồng bộ** trên màn hình lớn, ngồi ghế, lên sân khấu hát karaoke, đánh nhau cho vui, **nhặt rác kiếm điểm** và chơi **mini game treo tường** (Caro, Nối 4, Ma Sói...) bằng điểm chung của rạp. Có trang **/admin** để quản lý. Chạy được trên máy tính và điện thoại (điện thoại phải xoay ngang).
 
 Phong cách đồ hoạ tối giản (toàn hình khối cơ bản, không có model 3D hay ảnh nền).
 
@@ -35,8 +35,9 @@ Phong cách đồ hoạ tối giản (toàn hình khối cơ bản, không có m
 | Realtime | Node.js + Express + Socket.IO | mỗi phòng một namespace (`/ae`, `/khach1`, `/khach2`), trạng thái trong RAM |
 | Video | YouTube IFrame Player API | chỉ nhúng trình phát chính thức |
 | Giọng nói | WebRTC thuần (mesh) | báo hiệu qua Socket.IO, STUN Google + TURN tuỳ chọn |
-| Âm thanh | Web Audio API | hiệu ứng bước chân, tát, chuỗi hiệu ứng mic hát |
+| Âm thanh | Web Audio API + thẻ audio | hiệu ứng bước chân, tát, chuỗi hiệu ứng mic hát; tiếng game tự tạo bằng code (`sfx.js`) và vài file; giọng quản trò Ma Sói là file mp3 |
 | Triển khai | Render (Blueprint `render.yaml`) | một dịch vụ web phục vụ cả client lẫn server |
+| Quản trị | trang `/admin` (HTML thuần) | mật khẩu `ADMIN_PASSWORD`, giữ server không ngủ |
 
 ## 4. Cấu trúc thư mục
 
@@ -46,10 +47,15 @@ cinema-3d/
   render.yaml           cấu hình dịch vụ Render
   DESIGN.md             tài liệu thiết kế (file này)
   server/
-    index.js            toàn bộ server: phòng, ghế, sân khấu, đánh nhau, video, chat, chuyển tiếp tín hiệu
+    index.js            server: phòng, ghế, sân khấu, đánh nhau, video, chat, chuyển tiếp tín hiệu, cài đặt chỉnh được (`settings`)
+    wallet.js           ví điểm của rạp (điểm, phụ kiện đã mua, tên người đã rời để admin thấy)
+    games.js            luật mini game treo tường (Caro, Nối 4, Đập chuột, Rắn, 2048, Bầu cua/Tài xỉu, Bình chọn phim)
+    werewolf.js         luật và đồng hồ game Ma Sói (server làm quản trò)
+    trash.js            thả và nhặt rác kiếm điểm
+    admin.js / admin.html   API và giao diện trang quản trị /admin
   client/
     index.html          giao diện HTML/CSS: đăng nhập, menu, HUD, chat, nút cảm ứng
-    public/             file tĩnh: ảnh treo tường, âm thanh bước chân và tiếng tát
+    public/             file tĩnh: ảnh treo tường, âm thanh bước chân / tát / vỗ tay (`sounds/`), tiếng game (`sfx/`), giọng quản trò Ma Sói (`gm/`)
     src/
       main.js           "bộ não" client: nối mọi phần lại, vòng lặp vẽ, điều khiển, mạng
       scene/
@@ -62,8 +68,10 @@ cinema-3d/
       net/
         socket.js       lớp mỏng bọc Socket.IO (nhận/gửi sự kiện)
         voice.js        voice chat WebRTC mesh, âm lượng gần/xa, mic hát, dự phòng
+      games/            mỗi mini game một file (caro, connect4, whack, snake, g2048, dice, vote, werewolf), ví (`wallet.js`) và bảng âm thanh (`sound.js`); `index.js` là khung mở / đóng; `werewolf/` chứa vai, lời quản trò
       audio/
-        sounds.js       tiếng bước chân, tiếng tát (có vị trí, xa nhỏ gần to)
+        sounds.js       tiếng bước chân, tiếng tát, vỗ tay (có vị trí, xa nhỏ gần to)
+        sfx.js          tiếng cho game: tự tạo bằng code (bíp, xu, thắng thua...) và phát vài file (`public/sfx/`), tiếng nền ban đêm
         vocalChain.js   chuỗi hiệu ứng cho mic hát (EQ, nén, echo, reverb, limiter)
       player/
         youtube.js      bọc YouTube IFrame API (đọc link, tạo trình phát)
@@ -91,7 +99,7 @@ cinema-3d/
 - Vị trí gửi khoảng **15 lần/giây** khi có thay đổi; người nhận nội suy cho mượt.
 - Người đang nói thì **avatar sáng lên**.
 - Chat chữ: **cả phòng đều thấy** (khác với voice), giới hạn 200 ký tự và 1 tin mỗi 0.3 giây.
-- Phòng đủ 10 người thì người thứ 11 bị từ chối và quay về màn hình đăng nhập.
+- Phòng đủ người (mặc định 10, admin hạ được xuống tối thiểu 2) thì người kế tiếp bị từ chối và quay về màn hình đăng nhập.
 
 ### 5.4 Ngồi ghế
 - Đứng gần ghế trống (trong 1.4 m) thì hiện gợi ý; **E** (máy tính) hoặc nút **Ngồi** (điện thoại).
@@ -99,7 +107,7 @@ cinema-3d/
 - Người khác thấy avatar thấp xuống như đang ngồi.
 
 ### 5.5 Đánh nhau
-- **Chuột trái hoặc F** (điện thoại: nút **Đánh**). Server kiểm tra: người gần nhất trong **1.8 m**, trong góc ±60° phía trước, đánh cách nhau tối thiểu **1 giây**.
+- **Chuột trái hoặc F** (điện thoại: nút **Đánh**). Server kiểm tra: người gần nhất trong **1.8 m**, trong góc ±60° phía trước, đánh cách nhau tối thiểu **1 giây**. Admin tắt được đánh nhau hoặc chỉnh thời gian chờ / thời gian choáng (mục 5.17).
 - Người bị đánh **choáng 2 giây**: không đi, không xoay, không đánh/ngồi được. Màn hình rung nhẹ và có vòng sao 3D quay quanh "đầu" (vật thể thật gắn vào camera nên có phối cảnh). Người khác thấy 3 ngôi sao trên đầu người đó.
 - Đang ngồi hoặc đang hát mà bị đánh thì **bị văng khỏi ghế/sân khấu**.
 - Sau khi hết choáng được miễn nhiễm thêm 1 giây để không bị khoá liên tục.
@@ -132,7 +140,7 @@ cinema-3d/
 - **Màn hình nhắc lời** chiếu song song với màn hình lớn (cùng video, tắt tiếng, bám đúng thời điểm). Hình chỉ hiện trên máy người hát; người khác thấy màn hình đen. Đặt lệch sang bên và xoay vào mắt người hát để cột mic không che (đã kiểm tra bằng tính toán hình học).
 - **Đèn sân khấu** chỉ sáng khi có người hát: chùm sáng hình nón và vòng sáng tròn trên sàn, mọi người đều thấy.
 
-### 5.8 Âm thanh hiệu ứng
+### 5.8 Âm thanh hiệu ứng trong rạp
 - **Bước chân** (file chạy trên cỏ, cắt từng bước, phát ngẫu nhiên): mỗi 1.5 m đi được một bước; xa nhỏ gần to, lệch trái/phải theo hướng nguồn âm; tối đa 1/20 mức tối đa. Tắt khi ngồi hoặc choáng.
 - **Tiếng tát** (file có 4 tiếng, phát ngẫu nhiên): phát khi có người bị đánh trúng, cả phòng nghe (xa thì nhỏ), tối đa 1/2 mức tối đa.
 - **Tiếng vỗ tay** (file khán giả vỗ tay, cắt một đoạn 3 giây): phát khi có người vỗ tay, cả phòng nghe như nhau, tối đa 0.04; tối đa 2 tiếng chồng nhau để không thành tiếng ồn.
@@ -144,16 +152,24 @@ cinema-3d/
 | Đi | W A S D | cần gạt trái |
 | Nhìn | chuột | kéo ở nửa phải màn hình |
 | Bật/tắt mic | M | nút Mic |
-| Ngồi / đứng / hát / dừng hát | E | nút Ngồi/Đứng/Hát |
+| Ngồi / đứng / hát / dừng hát / mở game | E | một nút ngữ cảnh (đổi chữ: Ngồi, Đứng, Hát, Chơi game, Nhặt rác) |
+| Nhặt rác | R | nút ngữ cảnh khi đứng gần rác |
 | Đánh | chuột trái hoặc F | nút Đánh |
-| Hành động (vỗ tay, pháo, lightstick, tim) | phím 1, 2, 3, 4 | nút Hành động, rồi chọn biểu tượng |
+| Hành động (vỗ tay, pháo, lightstick, tim, ăn cơm) | phím 1, 2, 3, 4, 5 | nút Hành động, rồi chọn biểu tượng |
+| Đổi góc nhìn 1 / 3 | V (góc 3: Alt xoay mắt nhìn quanh) | nút máy ảnh (và nút mắt ở góc 3) |
+| Ví điểm | P | nút 💰 |
+| Chỉnh âm thanh | O | nút 🔊 |
 | Chat | Enter | nút Chat |
 | Mở menu | Esc | nút Menu |
+| Hiện thanh nút cài đặt bấm bằng chuột | Ctrl | không cần |
+
+**Thanh nút cài đặt (máy tính).** Nhấn **Ctrl** thì con trỏ được nhả ra và hiện một thanh nhỏ giữa mép trên với các nút **Ví, Âm thanh, Mic, Góc nhìn, Menu**. Nhấn Ctrl lần nữa, Esc hoặc bấm ra ngoài thanh để quay lại chơi. Cố ý không có nút đánh, nhặt hay cảm xúc.
 
 Điện thoại **bắt buộc xoay ngang** (dọc thì bị phủ lời nhắc). Bấm "Vào rạp" trên điện thoại sẽ vào toàn màn hình.
 
-### 5.10 Menu và cài đặt (lưu trong trình duyệt)
-- Thanh âm lượng: **video** (0–100%), **voice** (0–100% so với mức thiết kế), **hiệu ứng** bước chân và tát (0–200%).
+### 5.10 Menu, âm thanh và cài đặt (lưu trong trình duyệt)
+- **Bảng Âm thanh** (phím O, nút 🔊, hoặc nút trong menu) chỉ chỉnh to nhỏ, không bật tắt: **Hiệu ứng** (0–200%, gồm bước chân, tát, vỗ tay và mọi tiếng trong game), **Video** (0–100%), **Giọng người trong rạp** (0–100% so với mức thiết kế). Đang mở game thì có nút 🔊 trên thanh tiêu đề game (hoặc phím O) hiện khung nhỏ với hai thanh Hiệu ứng và Giọng người.
+- **Giọng đọc quản trò Ma Sói không có thanh chỉnh**: luôn to hết cỡ, muốn nhỏ hơn thì hạ âm lượng máy; trong bàn Ma Sói có nút bật / tắt hẳn giọng đọc.
 - **Chất lượng đồ hoạ**: Tự động / Thấp / Cao.
 - Ô tick **Hiện FPS**. Dòng trạng thái góc trái trên cho biết kết nối, mic, và **"nối x/y"** (x người đã nối voice được trong y người khác) để chẩn đoán khi mất tiếng.
 
@@ -161,6 +177,58 @@ cinema-3d/
 - **Tự phát hiện máy chỉ có đồ hoạ phần mềm** (không có tăng tốc card đồ hoạ) và bật **chế độ nhẹ**: bỏ đèn điểm, bỏ khử răng cưa, độ nét 0.75x, video 480p, đèn sân khấu chỉ dùng hình giả.
 - Nếu FPS dưới 30 thì **tự hạ độ nét** dần (thấp nhất 0.5x).
 - Ghế dùng một lệnh vẽ chung cho mỗi bộ phận (InstancedMesh) thay vì hàng trăm khối riêng.
+
+### 5.12 Điểm của rạp (ví chung)
+- Ai vào phòng có **500 điểm** (admin chỉnh được số này cho người vào sau). Điểm dùng chung cho mọi game, hát karaoke, tặng nhau và mua phụ kiện. Server giữ, khoá bằng `clientId` lưu ở trình duyệt nên tải lại trang không được phát lại 500.
+- Dữ liệu (điểm, phụ kiện đã mua, xếp hạng game) **chỉ nằm trong RAM của phòng** và bị xoá khi phòng trống quá 60 giây (admin chỉnh được).
+- **Ví** (phím P, nút 💰): tặng điểm cho người khác (10 / 50 / 100), cửa hàng phụ kiện (mũ, kính, tai, đồ sau lưng; kiểu nhân vật, trái cây, màu thân miễn phí), tab cách kiếm điểm.
+- **Hát karaoke** tốn 50 điểm mỗi lần lên sân khấu (admin chỉnh được): lên sân khấu là đứng dưới đèn ngay nhưng phải đồng ý trả điểm (Y / N) mới phát tiếng hát.
+- **Kiếm điểm:** thắng Caro / Nối 4 (ăn phần cược của đối thủ), Đập chuột, Rắn, 2048, Bầu cua / Tài xỉu, Bình chọn phim, Ma Sói, nhặt rác, được tặng. Mức cụ thể ghi ở tab "Kiếm điểm" trong ví và ở `client/src/economy.js`.
+
+### 5.13 Nhặt rác
+- Cứ 30 giây (admin chỉnh), server thả một món rác ở chỗ ngẫu nhiên trong rạp khi phòng có người, tối đa 6 món cùng lúc (đầy thì món cũ nhất biến mất). Rác hiện sáng trên sàn, không có cột sáng.
+- Đi tới gần (trong khoảng 1.1 m) rồi nhấn **R** (điện thoại: nút ngữ cảnh đổi thành "Nhặt rác") để nhặt: **+10 đến +50 điểm**, càng quý càng hiếm (10 phổ biến nhất, 50 hiếm nhất). Ai nhặt trước thì được, rác biến mất, không lưu gì.
+
+### 5.14 Mini game treo tường
+- Mỗi game là một "tranh" ở tường. Đứng trong 2.2 m rồi nhấn **E** (điện thoại: nút ngữ cảnh "Chơi game") để mở cửa sổ game 2D; Esc, nút Đóng hoặc bị đánh choáng thì đóng. Dòng chữ trên tranh là trạng thái trực tiếp (ai đang chơi, kỷ lục).
+- Luật chạy ở server (`server/games.js`, `server/werewolf.js`); client chỉ hiển thị và gửi lựa chọn (`client/src/games/`).
+
+| Game | Cách chơi ngắn |
+|---|---|
+| **Cờ Caro** (13×13) | 2 người ngồi hai phía, 5 quân liền hàng (không bị chặn cả hai đầu). **Cược bằng điểm** (10 đến 200, người ngồi trước chọn): thắng ăn cả hai phần, hoà hoàn lại, bỏ giữa ván là thua. Người khác xem. |
+| **Nối 4** (7×6) | Như Caro, quân rơi từ trên xuống rồi nảy nhẹ. |
+| **Đập chuột** | Cả phòng đua 30 giây, chuột nào ai bấm trước ăn điểm (🐹 +1, 🌟 +3, 💣 −2). Thưởng điểm rạp theo điểm ván. |
+| **Rắn săn mồi, 2048** | Chơi ở máy mình, điểm cao lên bảng kỷ lục chung; thưởng điểm rạp, cách nhau tối thiểu 20 giây. |
+| **Bầu cua / Tài xỉu** | Cả phòng cược bằng điểm chung trong 20 giây, server lắc xúc xắc. |
+| **Bình chọn phim** | Dán link YouTube đề xuất, mỗi người một phiếu, bấm Chiếu thì chiếu cho cả phòng. |
+| **Ma Sói** | Mục 5.15. |
+
+### 5.15 Ma Sói
+- **Server làm quản trò**: chia bài, chạy đêm / ngày, đếm giờ, tính kết quả; không cần người dẫn. **15 vai** chia ba phe (Dân làng, Ma Sói, phe thứ ba gồm Chán Đời và Sói Trắng). Mỗi ván **5 đến 10 người**; vai được rút ngẫu nhiên sao cho tổng điểm đội hình từ −3 đến +3 (`dealRoles` trong `client/src/games/werewolf/roles.js`).
+- **Phí 100 điểm mỗi người mỗi ván**, trừ đúng lúc ván bắt đầu (ngồi rồi rời bàn trước đó không mất). Người thắng nhận lại phí cộng lãi: **Dân +50, Sói +100, Chán Đời +100, Sói Trắng +100**; thua mất phí. Bỏ giữa ván là mất phí, không hoàn. Ván huỷ (còn dưới 3 người thật) thì hoàn phí. Dưới 100 điểm không ngồi vào bàn được.
+- **Ban đêm** mỗi vai có việc riêng, quản trò **chỉ gọi những vai có trong ván** theo thứ tự cố định (Thần Tình Yêu và Kẻ Phản Bội đêm đầu, Bảo Vệ trước bầy Sói, Sói Đầu Đàn và Sói Trắng sau Ma Sói, Phù Thủy gần cuối...). Mỗi lời gọi chỉ **chọn một lần**; mọi người của vai đã chọn xong thì sang vai kế.
+- **Sói Đầu Đàn** từ đêm 2 được biến người bị cắn thành Sói một lần, chỉ khi Bảo Vệ không che người đó và sau đó Sói vẫn ít hơn số người còn lại.
+- **Ban ngày** thảo luận 120 giây (sau 60 giây có nút Bỏ qua, tất cả còn sống bấm thì sang bỏ phiếu sớm), rồi bỏ phiếu treo cổ 30 giây. Người chết hoặc bị treo **không lộ vai**, hết ván mới lật hết. Thợ Săn chết thì có 15 giây chọn người bắn.
+- **Mic và chat:** ban ngày mic tự do (voice thường của rạp, vì người chơi đứng quanh tranh); **ban đêm tự tắt mic** người chơi, người chết bị tắt mic và chat tới hết ván (riêng Thợ Săn vẫn dùng được trong 15 giây chọn người bắn). Tắt mic chỉ ép được ở phía trình duyệt người đó; chặn chat ép được ở server. Ban đêm Sói có khung chat riêng.
+- **Giao diện:** bàn tròn 2D có ghế và hình đại diện giống nhân vật trái cây trong rạp, vai của mình là thẻ bài lật được (bấm để úp / ngửa), số phiếu hiện trên đầu mỗi người, phe thắng hiện to giữa bàn. Ghi chú chữ lời quản trò hiện giữa bàn cùng lúc phát giọng; có nút bật / tắt giọng đọc. Trên điện thoại tự chuyển sang bố cục thu gọn.
+- **Giọng quản trò** là các file mp3 trong `client/public/gm/` (lời thu ở `KICH_BAN_QUAN_TRO.md`); thiếu file thì im lặng, chữ vẫn hiện. Thông số của game (phí, lãi, số người, thời gian) admin chỉnh được; danh sách vai, điểm vai, luật vai thì không.
+
+### 5.16 Hiệu ứng âm thanh trong game
+- Tiếng cho game nằm ở `client/src/audio/sfx.js`, **phần lớn tự tạo bằng code** (bấm nút, mở / đóng, đặt quân, quân rơi, gộp ô 2048, ăn mồi, đập chuột, xúc xắc, xu khi nhận / mất điểm, thắng, thua, hoà, đếm ngược, chuông, bỏ phiếu...). Có thêm vài file trong `client/public/sfx/`: tiếng bonk (đập chuột), tiếng treo cổ, tiếng súng (Thợ Săn bắn), sói hú (lúc trời tối), tiếng cười phù thủy, chim hót (lúc trời mới sáng) và tiếng ếch nhái ban đêm (vang từng đợt 8 đến 14 giây, nghỉ 5 đến 6 giây).
+- Mọi tiếng này theo thanh **Hiệu ứng** trong bảng Âm thanh. Trình duyệt chỉ cho phát sau một lần chạm, nên bộ phát âm tự mở khoá ở lần chạm / bấm đầu tiên (đặc biệt cần trên iPhone).
+
+### 5.17 Trang quản trị `/admin`
+- Vào bằng mật khẩu `ADMIN_PASSWORD` (biến môi trường); phiên đăng nhập hết hạn thì phải vào lại. Trang tự làm mới mỗi 3 giây (không vẽ lại khi đang gõ ô nhập).
+- **Server:** số người online, thời gian chạy, RAM, CPU. **Giữ server không ngủ:** tự ping `/healthz` theo chu kỳ (bật / tắt, ping thử, chỉnh phút); nên đặt thêm dịch vụ ping ngoài (UptimeRobot, cron-job.org) vì tự ping không đánh thức được server đã ngủ.
+- **Từng phòng:** danh sách người đang trong phòng (tên, vị trí, điểm, địa chỉ) với các nút **cộng / trừ / đặt điểm**, khoá chat, đá, cấm; danh sách **người đã rời phòng nhưng còn điểm** (tên, lần cuối, điểm) cũng chỉnh điểm được cho tới khi phòng bị dọn; tắt video, thả / dọn rác, xoá dữ liệu phòng.
+- **Gửi thông báo** cho một phòng hoặc cả rạp; danh sách đang bị cấm (bỏ cấm); **nhật ký thao tác**.
+- **Thông số chỉnh được lúc đang chạy** (áp dụng ngay, mất khi server khởi động lại):
+  - Điểm khi mới vào; phí vào hát karaoke.
+  - Số người tối đa mỗi phòng (2 đến 10); bao lâu phòng trống thì xoá điểm / game.
+  - Đánh nhau: bật / tắt, thời gian chờ giữa hai cú, thời gian choáng.
+  - Điểm thưởng Đập chuột, Rắn, 2048, Bình chọn phim (% so với mức gốc); khoảng cách giữa hai lần thưởng Rắn / 2048; thời gian chờ khi bỏ ván Caro / Nối 4.
+  - Rác: bật / tắt, bao lâu một món, tối đa bao nhiêu món.
+  - Ma Sói: phí, lãi từng phe, số người, thời gian từng giai đoạn và từng vai ban đêm (danh sách và giới hạn do `WW_FIELDS` ở `roles.js` quyết định).
 
 ## 6. Chi tiết kỹ thuật quan trọng
 
@@ -207,7 +275,9 @@ Số lượng ghế (18) và sân khấu (2) được **khai báo ở hai nơi**
 | `sit` / `stand` | `{seat}` / – | ngồi ghế / đứng dậy |
 | `sing` / `stop-sing` | `{stage}` / – | lên / xuống sân khấu |
 | `punch` | – | đánh |
-| `emote` | `{type}` (`clap`, `confetti`, `heart`, `lightstick`) | làm hành động |
+| `emote` | `{type}` (`clap`, `confetti`, `heart`, `lightstick`, `eat`) | làm hành động |
+| `game-open` / `game-close` / `game-act` | `{game}` / `{game, data}` | mở, đóng, thao tác mini game |
+| `sing-pay`, `tip`, `shop-buy`, `trash-pick` | | trả điểm hát, tặng điểm, mua phụ kiện, nhặt rác |
 | `video-load` / `-play` / `-pause` / `-seek` | `{videoId}` hoặc `{position}` | điều khiển video |
 | `signal` | `{to, data}` | báo hiệu WebRTC (hello, offer, answer, candidate, send-mode) |
 
@@ -217,7 +287,7 @@ Số lượng ghế (18) và sân khấu (2) được **khai báo ở hai nơi**
 |---|---|
 | `init` | danh sách người trong phòng, video đang chiếu, cấu hình STUN/TURN |
 | `player-joined` / `player-left` / `player-moved` | người vào, rời, di chuyển |
-| `room-full` | phòng đã đủ 10 người |
+| `room-full` | phòng đã đủ người |
 | `chat` | tin nhắn của cả phòng |
 | `seat-update` / `seat-denied` | ghế được cập nhật / bị từ chối |
 | `stage-update` / `stage-denied` | sân khấu được cập nhật / bị từ chối |
@@ -226,19 +296,24 @@ Số lượng ghế (18) và sân khấu (2) được **khai báo ở hai nơi**
 | `emote` | có người làm hành động (lightstick kèm `on`: đang cầm hay đã cất) |
 | `video-state` | trạng thái video mới |
 | `signal` | báo hiệu WebRTC từ người khác |
+| `wallet` | điểm và phụ kiện của mình (kèm `delta`, `reason` để hiện thông báo +/−) |
+| `game-state` / `game-brief` / `game-cue` / `game-denied` | trạng thái game (riêng từng người với Ma Sói), dòng tóm tắt trên tranh, tên file giọng quản trò, bị từ chối mở game |
+| `trash-add` / `trash-gone` | rác mới / rác đã bị nhặt |
+| `notice`, `banned` | thông báo từ admin / hệ thống, bị cấm |
 
 ## 8. Triển khai
 
 - Build: `npm run build` (cài và build client, cài server). Chạy: `npm start` (một server phục vụ cả web lẫn realtime). Cổng lấy từ biến `PORT`.
 - Hosting: **Render** qua `render.yaml` (gói free). Tự build lại mỗi khi có commit mới lên GitHub.
-- Biến môi trường tuỳ chọn: `TURN_URL`, `TURN_USERNAME`, `TURN_CREDENTIAL` để voice nối được qua các mạng khó (4G, mạng công ty).
+- Biến môi trường: `ROOM_PASSWORD_AE` (mật khẩu phòng ae; phòng khoá mà chưa đặt thì không ai vào được), `ADMIN_PASSWORD` (mật khẩu trang /admin), `KEEPALIVE_URL` hoặc `RENDER_EXTERNAL_URL` (địa chỉ để tự ping giữ thức), tuỳ chọn `TURN_URL`, `TURN_USERNAME`, `TURN_CREDENTIAL` để voice nối được qua các mạng khó (4G, mạng công ty), `ROOM_RESET_MS` (giá trị đầu cho thời gian dọn phòng trống). Mật khẩu không ghi trong code vì repo công khai.
 - Cần HTTPS để dùng micro (Render có sẵn).
 
 ## 9. Giới hạn đã biết
 
-- **Trạng thái nằm trong RAM**: server khởi động lại hoặc ngủ (gói free Render ngủ sau ~15 phút không dùng, mở lại mất khoảng nửa phút) thì mất phòng và video; mọi người vào lại là được. Ba phòng, mỗi phòng tối đa 10 người (cả rạp tối đa 30).
+- **Trạng thái nằm trong RAM**: server khởi động lại hoặc ngủ (gói free Render ngủ sau ~15 phút không dùng, mở lại mất khoảng nửa phút) thì mất phòng, video, điểm, phụ kiện đã mua và mọi cài đặt trang admin (về mặc định); mọi người vào lại là được. Ba phòng, mỗi phòng tối đa 10 người (cả rạp tối đa 30). Tên trên trang admin chỉ có với người đã vào phòng từ lúc server chạy.
 - **Voice qua mạng khác nhau có thể không nối được** nếu chưa cấu hình TURN.
 - **Voice trên iPhone/iPad chưa được kiểm chứng trên thiết bị thật** (chỉ thử bằng Chrome tự động). Có cơ chế dự phòng nhưng hiệu quả thực tế chưa biết.
+- **Ma Sói và tiếng game chưa thử đủ trên thiết bị thật**: giọng quản trò và tiếng game trên iPhone, bố cục điện thoại và nhiều người thật chơi cùng lúc mới thử bằng bot và ảnh chụp giả lập. Tắt mic ban đêm chỉ ép được ở phía trình duyệt người chơi. Thiếu file `gm_psychic_sleep` nên lời "Nhà Ngoại Cảm nhắm mắt" chỉ hiện chữ.
 - **Các tỉ lệ âm lượng** (bước chân 1/20, tát 1/2, mic hát 3/4, voice 3/5) là **mức cài đặt so với mức tối đa**, không phải độ to đo được so với YouTube; nghe bằng tai rồi chỉnh các hằng số.
 - **Màn hình nhắc lời** cần chạy thêm một trình phát YouTube trên máy người hát (nặng hơn trên máy yếu).
 - **Quảng cáo YouTube** vẫn có thể hiện và làm lệch hình giữa những người xem khác nhau (chưa xử lý).
@@ -255,5 +330,9 @@ Số lượng ghế (18) và sân khấu (2) được **khai báo ở hai nơi**
 | Độ sáng đèn trần, ánh sáng nền | `client/src/scene/cinema.js` | `CEILING_LIGHT_INTENSITY`, `AMBIENT_INTENSITY` |
 | Đèn sân khấu | `client/src/scene/cinema.js` | `STAGE_BEAM_OPACITY`, `STAGE_BEAM_RADIUS`... |
 | Vị trí màn hình nhắc lời | `client/src/scene/cinema.js` | `MONITOR_SIDE_OFFSET`, `MONITOR_CENTER_Y` |
-| Tầm đánh, thời gian choáng | `server/index.js` | `PUNCH_RANGE`, `STUN_MS`, `PUNCH_COOLDOWN_MS` |
+| Tầm đánh | `server/index.js` | `PUNCH_RANGE` |
+| Thời gian choáng, thời gian chờ đánh, phí hát, thưởng game... | trang `/admin` (mức mặc định ở `settings` trong `server/index.js`) | |
+| Mức gốc điểm: rác, mức cược, phí hát | `client/src/economy.js` | `TRASH_TIERS`, `DUEL_STAKES`, `SING_COST` |
+| Thông số Ma Sói | trang `/admin` (mặc định ở `wwDefaults` trong `client/src/games/werewolf/roles.js`) | |
+| Mức tiếng game tự tạo | `client/src/audio/sfx.js` | `BASE`, `gain` trong `FILES` |
 | Số người tối đa mỗi phòng, danh sách phòng | `client/src/rooms.js` | `MAX_PLAYERS`, `ROOMS` |

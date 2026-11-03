@@ -180,6 +180,7 @@ export default {
       const a = new Audio();
       a.preload = 'auto';
       a.playsInline = true;
+      a.volume = 1; // giọng quản trò luôn to hết cỡ, người chơi tự hạ bằng âm lượng máy; không có thanh chỉnh nào trong game
       return a;
     });
     let poolNext = 0;

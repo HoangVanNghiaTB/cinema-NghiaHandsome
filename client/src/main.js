@@ -17,7 +17,7 @@ import { createYouTubePlayer, parseVideoId } from './player/youtube.js';
 import { Avatars } from './scene/avatars.js';
 import { Trash } from './scene/trash.js';
 import { LOOK_OPTIONS, LOOK_LABELS, SHIRT_COLORS, ITEM_PRICES, itemKey, cleanLook } from './scene/looks.js';
-import { START_POINTS, SING_COST } from './economy.js';
+import { START_POINTS, econ } from './economy.js';
 import { connectToRoom } from './net/socket.js';
 import { ROOMS, MAX_PLAYERS, DEFAULT_ROOM, roomById } from './rooms.js';
 import { createVoice } from './net/voice.js';
@@ -142,14 +142,14 @@ qualitySelect.addEventListener('change', () => {
 function applyVideoVolume() {
   player?.setVolume(volumes.video);
 }
-for (const key of Object.keys(volumes)) {
-  const slider = $(`vol-${key}`);
-  const label = $(`vol-${key}-val`);
-  slider.value = volumes[key];
-  label.textContent = `${volumes[key]}%`;
-  slider.addEventListener('input', () => {
-    volumes[key] = Number(slider.value);
-    label.textContent = `${volumes[key]}%`;
+// Bảng "Âm thanh" (phím O, nút 🔊): chỉ chỉnh to nhỏ. Giọng đọc quản trò Ma Sói không nằm ở đây, luôn to hết cỡ.
+const soundSettings = {
+  get: () => ({ ...volumes }),
+  defaults: VOLUME_DEFAULTS,
+  max: VOLUME_MAX,
+  set(key, value) {
+    if (!(key in volumes)) return;
+    volumes[key] = Math.min(VOLUME_MAX[key], Math.max(0, Number(value) || 0));
     if (key === 'video') applyVideoVolume();
     if (key === 'effects') {
       sounds.setVolume(volumes.effects / 100);
@@ -160,8 +160,8 @@ for (const key of Object.keys(volumes)) {
     } catch {
       // không lưu được thì thôi
     }
-  });
-}
+  },
+};
 
 // Ẩn/hiện dòng FPS ở góc trái trên (nhớ lựa chọn cho lần sau)
 const FPS_KEY = 'cinema-show-fps';
@@ -587,6 +587,7 @@ function joinRoom(profile) {
       closeGame(); // kết nối lại thì thoát game đang mở
       if (self) {
         setWallet(self.wallet);
+        setSingCost(self.singCost);
         // Server bỏ các phụ kiện chưa mua khỏi nhân vật của mình (lần đầu vào chỉ có nhân vật trơn)
         const cleaned = cleanLook(self.look);
         if (JSON.stringify(cleaned) !== JSON.stringify(myLook)) {
@@ -658,7 +659,8 @@ function joinRoom(profile) {
       }
     },
     onSeatDenied: () => addChatLine('Ghế này đã có người ngồi.', { system: true }),
-    onStage: ({ id, stage, paid }) => {
+    onStage: ({ id, stage, paid, cost }) => {
+      if (id === myId && cost !== undefined) setSingCost(cost); // admin có thể đổi phí hát
       for (const [index, owner] of stageOwners) if (owner === id) stageOwners.delete(index);
       if (stage !== null) stageOwners.set(stage, id);
       if (stage !== null && paid) paidSingers.add(id);
@@ -920,7 +922,12 @@ async function answerSing(yes) {
 }
 $('sing-yes').addEventListener('click', () => answerSing(true));
 $('sing-no').addEventListener('click', () => answerSing(false));
-$('sing-cost').textContent = String(SING_COST);
+const setSingCost = (n) => {
+  if (!Number.isFinite(n)) return;
+  econ.singCost = n;
+  $('sing-cost').textContent = String(n);
+};
+setSingCost(econ.singCost);
 let micBeforeSing = false; // trước khi hát mic đang bật hay tắt, để trả lại khi hát xong
 
 function nearestFreeStage() {
@@ -1170,6 +1177,7 @@ const gameHost = createGameHost({
     tip: (to, amt) => room?.tip(to, amt),
     buy: (slot, item) => room?.buy(slot, item),
     mic: micControl,
+    sound: soundSettings,
   },
   onClose: () => {
     if (isTouch) touch.setVisible(true);
@@ -1198,6 +1206,7 @@ function openGame(id) {
     document.body.classList.remove('game-open');
     return;
   }
+  gameSoundBtn.style.display = id === 'sound' ? 'none' : ''; // bảng Âm thanh đã có sẵn các thanh chỉnh
   keys.clear();
   if (isTouch) touch.setVisible(false);
   else controls.unlock();
@@ -1206,9 +1215,46 @@ function closeGame() {
   if (!gameOpen) return;
   gameOpen = false;
   document.body.classList.remove('game-open');
+  toggleGameVol(false);
   gameHost.close();
 }
 $('game-close').addEventListener('click', closeGame);
+// Chỉnh âm thanh ngay trong lúc chơi: nút 🔊 trên thanh game (hoặc phím O) mở khung nhỏ có thanh Hiệu ứng và Giọng người
+const gameSoundBtn = $('game-sound');
+const gameVolBox = $('game-vol');
+function toggleGameVol(show = gameVolBox.style.display !== 'block') {
+  if (!show) {
+    gameVolBox.style.display = 'none';
+    return;
+  }
+  const cur = soundSettings.get();
+  gameVolBox.replaceChildren();
+  for (const [key, label] of [['effects', 'Hiệu ứng'], ['voice', 'Giọng người trong rạp']]) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const name = document.createElement('span');
+    name.textContent = label;
+    const val = document.createElement('b');
+    val.textContent = `${cur[key]}%`;
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = '0';
+    input.max = String(soundSettings.max[key]);
+    input.value = String(cur[key]);
+    input.addEventListener('input', () => {
+      soundSettings.set(key, Number(input.value));
+      val.textContent = `${input.value}%`;
+    });
+    if (key === 'effects') input.addEventListener('change', () => sfx.play('coin'));
+    row.append(name, val, input);
+    gameVolBox.appendChild(row);
+  }
+  const note = document.createElement('small');
+  note.textContent = 'Giọng đọc quản trò Ma Sói luôn to hết cỡ; muốn nhỏ hơn hãy hạ âm lượng máy.';
+  gameVolBox.appendChild(note);
+  gameVolBox.style.display = 'block';
+}
+gameSoundBtn.addEventListener('click', () => toggleGameVol());
 // Nút mic ngay trong cửa sổ game (máy tính và điện thoại): đang mở game thì phím M của rạp không dùng được vì con trỏ đã nhả ra
 const gameMicBtn = $('game-mic');
 function updateGameMic() {
@@ -1223,7 +1269,10 @@ function gameToggleMic() {
   updateGameMic();
 }
 gameMicBtn.addEventListener('click', gameToggleMic);
-setInterval(updateGameMic, 300); // trạng thái mic có thể đổi do game (tắt ban đêm...) hoặc do chỗ khác
+setInterval(() => {
+  updateGameMic();
+  if (toolbarMode) updateToolbar();
+}, 300); // trạng thái mic có thể đổi do game (tắt ban đêm...) hoặc do chỗ khác
 $('leave').addEventListener('click', leaveRoom);
 // Ví điểm (tặng điểm, cửa hàng): phím P, hoặc nút 💰 cạnh nút ẩn/hiện phím ảo trên điện thoại
 function openWallet() {
@@ -1231,10 +1280,19 @@ function openWallet() {
   openGame('wallet');
 }
 $('btn-wallet').addEventListener('click', openWallet);
+// Bảng chỉnh âm thanh: phím O, nút 🔊 trên điện thoại, hoặc nút trong menu
+function openSound() {
+  if (!room || !myId || isStunned()) return;
+  menu.style.display = 'none';
+  openGame('sound');
+}
+$('btn-sound').addEventListener('click', openSound);
+$('open-sound').addEventListener('click', openSound);
 
 addEventListener('keydown', (e) => {
   if (gameOpen && e.code === 'Escape') closeGame();
   // phím M trong cửa sổ game (không khi đang gõ chữ)
+  if (gameOpen && e.code === 'KeyO' && !e.repeat && !['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName) && gameSoundBtn.style.display !== 'none') toggleGameVol();
   if (gameOpen && e.code === 'KeyM' && !e.repeat && !['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) gameToggleMic();
 });
 
@@ -1427,6 +1485,56 @@ const touch = isTouch
   : null;
 
 // Vào/ra chế độ chơi (đóng/mở menu)
+// Thanh nút cài đặt cho máy tính: nhấn Ctrl để nhả con trỏ và hiện thanh; Ctrl lần nữa, Esc hoặc bấm ra ngoài để quay lại.
+// Chỉ gồm các nút cài đặt (ví, âm thanh, mic, góc nhìn, menu), không có nút đánh, nhặt, cảm xúc...
+const toolbar = $('toolbar');
+let toolbarMode = false;
+function updateToolbar() {
+  const mic = $('tb-mic');
+  mic.classList.toggle('on', voiceMode === 'mic' && micOn);
+  mic.disabled = micLocked || voiceMode === 'listen-only';
+  mic.textContent = micLocked ? '🔇 Mic bị tắt' : voiceMode === 'listen-only' ? '🔇 Không có mic' : micOn ? '🎙️ Mic bật' : '🎙️ Mic tắt';
+}
+function showToolbar(on) {
+  toolbarMode = on;
+  toolbar.style.display = on ? 'flex' : 'none';
+  if (on) updateToolbar();
+}
+function exitToolbar() {
+  showToolbar(false);
+  controls.lock();
+}
+addEventListener('keydown', (e) => {
+  if (isTouch) return;
+  if ((e.code === 'ControlLeft' || e.code === 'ControlRight') && !e.repeat) {
+    if (toolbarMode) exitToolbar();
+    else if (controls.isLocked && room && myId) {
+      showToolbar(true); // đặt trước khi nhả con trỏ để sự kiện unlock không bật menu
+      controls.unlock();
+    }
+  } else if (toolbarMode && e.code === 'Escape') exitToolbar();
+});
+document.addEventListener('pointerdown', (e) => {
+  if (toolbarMode && !toolbar.contains(e.target)) exitToolbar();
+});
+// Mở ví / bảng âm thanh từ thanh nút: mở được thì thanh tự ẩn (đóng bảng sẽ khoá con trỏ lại), không mở được thì giữ thanh
+function openFromToolbar(open) {
+  open();
+  if (gameOpen) showToolbar(false);
+}
+$('tb-wallet').addEventListener('click', () => openFromToolbar(openWallet));
+$('tb-sound').addEventListener('click', () => openFromToolbar(openSound));
+$('tb-mic').addEventListener('click', () => {
+  if (voiceMode === null) startVoice().then(updateToolbar);
+  else toggleMic();
+  updateToolbar();
+});
+$('tb-view').addEventListener('click', toggleView);
+$('tb-menu').addEventListener('click', () => {
+  showToolbar(false);
+  menu.style.display = 'flex';
+});
+
 function setActive(active) {
   if (isTouch) {
     touchActive = active;
@@ -1436,10 +1544,11 @@ function setActive(active) {
   if (active) {
     menu.style.display = 'none';
     document.body.classList.remove('show-chat');
+    showToolbar(false);
     applyDesired(); // sau thao tác click đầu tiên, trình duyệt cho phép phát có tiếng
   } else {
     document.body.classList.add('show-chat');
-    if (!chatting && !mixerOpen && !gameOpen && login.style.display === 'none') menu.style.display = 'flex'; // đang chat thì không hiện menu
+    if (!toolbarMode && !chatting && !mixerOpen && !gameOpen && login.style.display === 'none') menu.style.display = 'flex'; // đang chat thì không hiện menu
   }
 }
 
@@ -1478,6 +1587,7 @@ addEventListener('keydown', (e) => {
   else if (EMOTE_KEYS[e.code] && !e.repeat) doEmote(EMOTE_KEYS[e.code]);
   else if (e.code === 'Enter' && !e.repeat) startChat();
   else if (e.code === 'KeyP' && !e.repeat) openWallet();
+  else if (e.code === 'KeyO' && !e.repeat) openSound();
   else if (e.code === 'KeyY' && singPromptOpen()) answerSing(true);
   else if (e.code === 'KeyN' && singPromptOpen()) answerSing(false);
   else keys.add(e.code);

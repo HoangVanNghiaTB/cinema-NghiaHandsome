@@ -2,7 +2,8 @@
 // File thuần dữ liệu (không dùng DOM / three), server cũng import.
 
 export const START_POINTS = 500;
-export const SING_COST = 50; // điểm để vào hát mỗi lần lên sân khấu
+export const SING_COST = 50; // điểm để vào hát mỗi lần lên sân khấu (mặc định; admin chỉnh được, mức thật nằm ở econ.singCost)
+export const econ = { singCost: SING_COST }; // giá trị đang dùng, main.js cập nhật theo server
 export const SING_PROMPT_MS = 15000; // không trả lời trong khoảng này thì tự xuống sân khấu
 export const TIP_AMOUNTS = [10, 50, 100]; // mức tặng điểm cho nhau
 

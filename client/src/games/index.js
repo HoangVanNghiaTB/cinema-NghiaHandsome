@@ -7,6 +7,7 @@ import dice from './dice.js';
 import connect4 from './connect4.js';
 import vote from './vote.js';
 import wallet from './wallet.js';
+import sound from './sound.js';
 import werewolf from './werewolf.js';
 
 // Đăng ký game: id khớp với GAME_PANELS (scene/gamePanels.js) và server/games.js.
@@ -15,7 +16,7 @@ import werewolf from './werewolf.js';
 //   ctx.playVideo(videoId) chiếu video cho cả rạp; ctx.close() đóng game
 //   ctx.wallet() -> { pts, owned } điểm hiện có; game có hàm onWallet() thì được gọi mỗi khi điểm đổi
 //   game có `local: true` (như ví) không có phòng riêng ở server; `extra` (từ main.js) thêm các hàm riêng vào ctx
-const GAMES = { caro, whack, snake, g2048, dice, connect4, vote, wallet, werewolf };
+const GAMES = { caro, whack, snake, g2048, dice, connect4, vote, wallet, sound, werewolf };
 
 // Khung chung: mở/đóng overlay, nối game với mạng
 //   net()      trả về kết nối phòng hiện tại (hoặc null)

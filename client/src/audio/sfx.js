@@ -178,16 +178,18 @@ const SOUNDS = {
 };
 
 // Tiếng từ file (client/public/sfx/): tải khi game cần (sfx.preload). gain là mức tuyệt đối trước hệ số "Hiệu ứng";
-// dur + fadeOut cắt tiếng dài cho vừa lúc dùng; loop là tiếng nền lặp (dế đêm, họa mi ngày) chỉ dùng qua sfx.ambient
+// dur + fadeIn / fadeOut cắt tiếng dài cho vừa lúc dùng; ambient là tiếng nền chỉ dùng qua sfx.ambient:
+// burst = cứ vang `on` giây (ngẫu nhiên trong khoảng) rồi im `off` giây, lặp lại, cho thưa chứ không kêu liền tù tì
 const FILES = {
   bonk: { url: '/sfx/bonk.mp3', gain: 0.3 },
-  hang: { url: '/sfx/hang.mp3', gain: 0.7 },
+  hang: { url: '/sfx/hang.mp3', gain: 0.45 },
   gunshot: { url: '/sfx/gunshot.mp3', gain: 0.5 },
   howl: { url: '/sfx/wolf_howl.mp3', gain: 0.3, dur: 6.5, fadeOut: 2 },
   laugh: { url: '/sfx/witch_laugh.mp3', gain: 0.35, dur: 4, fadeOut: 1.5 },
-  ambNight: { url: '/sfx/amb_night.mp3', gain: 0.25, loop: true },
-  ambDay: { url: '/sfx/amb_day.mp3', gain: 0.4, loop: true },
+  dawnBirds: { url: '/sfx/dawn_birds.mp3', gain: 0.4, fadeIn: 1.5, fadeOut: 4 },
+  ambNight: { url: '/sfx/amb_night.mp3', gain: 0.25, ambient: true, burst: { on: [8, 14], off: [20, 45] } },
 };
+const rand = ([a, b]) => a + Math.random() * (b - a);
 const buffers = {};
 const loading = {};
 function load(name) {
@@ -218,59 +220,80 @@ function playFile(name) {
   const src = c.createBufferSource();
   src.buffer = buf;
   const g = c.createGain();
-  g.gain.setValueAtTime(def.gain * master, t);
+  const level = def.gain * master;
+  if (def.fadeIn) {
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(level, t + def.fadeIn);
+  } else {
+    g.gain.setValueAtTime(level, t);
+  }
   if (def.fadeOut) {
-    g.gain.setValueAtTime(def.gain * master, t + dur - def.fadeOut);
+    g.gain.setValueAtTime(level, t + dur - def.fadeOut);
     g.gain.linearRampToValueAtTime(0, t + dur);
   }
   src.connect(g).connect(c.destination);
   src.start(t, 0, dur);
 }
 
-// Tiếng nền lặp (một cái một lúc), vào / ra từ từ. ambient(null) để tắt.
-let amb = null; // { name, src, g }
+// Tiếng nền (một cái một lúc), vang từng đợt thưa thớt. ambient(null) để tắt.
+let amb = null; // { name, out, src, timer }
 let wantAmb = null;
 function stopAmb(fade = 1.5) {
   const a = amb;
   amb = null;
   if (!a || !ctx) return;
+  clearTimeout(a.timer);
   const t = ctx.currentTime;
-  a.g.gain.cancelScheduledValues(t);
-  a.g.gain.setValueAtTime(a.g.gain.value, t);
-  a.g.gain.linearRampToValueAtTime(0, t + fade);
-  a.src.stop(t + fade + 0.1);
+  a.out.gain.cancelScheduledValues(t);
+  a.out.gain.setValueAtTime(a.out.gain.value, t);
+  a.out.gain.linearRampToValueAtTime(0, t + fade);
+  a.src?.stop(t + fade + 0.1);
 }
 // Phát tiếng nền đang muốn nếu file đã tải xong và được phép phát
 function tryAmb() {
   if (wantAmb && buffers[wantAmb] && ctx?.state === 'running') startAmb(wantAmb);
 }
+// Một đợt: vào từ từ, vang một lúc, ra từ từ; xong hẹn đợt sau sau một quãng im ngẫu nhiên
+function pulse(a) {
+  if (amb !== a) return;
+  const def = FILES[a.name];
+  const buf = buffers[a.name];
+  const on = Math.min(rand(def.burst.on), buf.duration - 1);
+  const t = ctx.currentTime;
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const env = ctx.createGain();
+  env.gain.setValueAtTime(0, t);
+  env.gain.linearRampToValueAtTime(1, t + 2);
+  env.gain.setValueAtTime(1, t + on - 3);
+  env.gain.linearRampToValueAtTime(0, t + on);
+  src.connect(env).connect(a.out);
+  src.start(t, Math.random() * (buf.duration - on), on);
+  a.src = src;
+  a.timer = setTimeout(() => pulse(a), (on + rand(def.burst.off)) * 1000);
+}
 function startAmb(name) {
   const buf = buffers[name];
   if (!buf || !ctx || amb?.name === name) return;
   stopAmb();
-  const t = ctx.currentTime;
-  const src = ctx.createBufferSource();
-  src.buffer = buf;
-  src.loop = true;
-  const g = ctx.createGain();
-  g.gain.setValueAtTime(0, t);
-  g.gain.linearRampToValueAtTime(FILES[name].gain * master, t + 2);
-  src.connect(g).connect(ctx.destination);
-  src.start(t, Math.random() * buf.duration * 0.8);
-  amb = { name, src, g };
+  const out = ctx.createGain();
+  out.gain.value = FILES[name].gain * master;
+  out.connect(ctx.destination);
+  amb = { name, out, src: null, timer: 0 };
+  pulse(amb);
 }
 
 export const sfx = {
   unlock,
   setVolume(scale) {
     master = Math.max(0, scale);
-    if (amb && ctx) amb.g.gain.setTargetAtTime(FILES[amb.name].gain * master, ctx.currentTime, 0.1);
+    if (amb && ctx) amb.out.gain.setTargetAtTime(FILES[amb.name].gain * master, ctx.currentTime, 0.1);
   },
   // Tải trước các file tiếng (gọi khi mở game cần chúng)
   preload(names) {
     names.forEach(load);
   },
-  // Bật tiếng nền (tên trong FILES có loop) hoặc tắt bằng null
+  // Bật tiếng nền (tên trong FILES có ambient) hoặc tắt bằng null
   ambient(name) {
     wantAmb = name;
     if (!name) return stopAmb();
@@ -282,7 +305,7 @@ export const sfx = {
   },
   play(name, arg) {
     const make = SOUNDS[name];
-    const file = FILES[name] && !FILES[name].loop;
+    const file = FILES[name] && !FILES[name].ambient;
     if ((!make && !file) || master <= 0) return;
     const c = ensure();
     if (!c) return;

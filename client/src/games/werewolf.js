@@ -129,7 +129,7 @@ export default {
     let chatDraft = '';
     let logEl = null; // khung chat đang hiện (để cập nhật tin mới mà không dựng lại cả cửa sổ lúc đang gõ)
     let timerEl = null;
-    sfx.preload(['hang', 'gunshot', 'howl', 'laugh', 'ambNight', 'ambDay']);
+    sfx.preload(['hang', 'gunshot', 'howl', 'laugh', 'dawnBirds', 'ambNight']);
     let cardFace = true; // thẻ bài đang ngửa hay úp (bấm vào thẻ để úp lại, tránh người bên cạnh nhìn trộm)
     let dealtKey = '';
     let compact = false; // màn hình nhỏ (điện thoại): thu gọn bàn, ghế, thẻ bài cho vừa
@@ -587,8 +587,8 @@ export default {
           const was = new Map(s.players.map((p) => [p.idx, p.alive]));
           if (next.players.some((p) => was.get(p.idx) && !p.alive)) sfx.play(s.phase === 'vote' ? 'hang' : s.phase === 'hunter' ? 'gunshot' : 'death');
         }
-        // tiếng nền: dế kêu ban đêm, họa mi ban ngày; ngoài ván thì tắt
-        sfx.ambient(next.phase === 'night' ? 'ambNight' : ['day', 'vote', 'hunter'].includes(next.phase) ? 'ambDay' : null);
+        // tiếng nền ban đêm: ếch nhái kêu thưa thớt từng đợt; hết đêm hoặc ngoài ván thì tắt
+        sfx.ambient(next.phase === 'night' ? 'ambNight' : null);
         if (s && s.phase !== 'ended' && next.phase === 'ended' && next.result?.winner) {
           const mine = next.result.payouts.find((p) => p.name === ctx.me().name);
           if (mine) setTimeout(() => sfx.play(mine.delta > 0 ? 'win' : 'lose'), 600);
@@ -607,6 +607,7 @@ export default {
       cue(d) {
         playCue(d.clip);
         if (d.clip === 'night_start') sfx.play('howl'); // sói hú khi trời tối
+        else if (d.clip === 'dawn') sfx.play('dawnBirds'); // chim hót lúc trời mới sáng
         else if (d.clip === 'witch_sleep') sfx.play('laugh'); // Phù Thủy cười khi nhắm mắt
       },
       destroy() {
